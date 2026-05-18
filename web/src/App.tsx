@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { ApiClientError } from "@/lib/api/client"
 import { useCreateScan, useScan } from "@/lib/api/hooks"
+import { isTerminalScanStatus, type ScanPhase, type ScanStatus } from "@/lib/api/types"
 
 const URL_PLACEHOLDER =
   "Enter a website URL, for example: https://example.com"
@@ -133,6 +134,12 @@ function App() {
           <div className="space-y-6">
             {activeScan.data === undefined ? (
               <EmptyState />
+            ) : !isTerminalScanStatus(activeScan.data.status) ? (
+              <LoadingScanState
+                id={activeScan.data.id}
+                phase={activeScan.data.phase}
+                isRefreshing={activeScan.isFetching}
+              />
             ) : (
               <ActiveScanState
                 id={activeScan.data.id}
@@ -225,8 +232,8 @@ function EmptyState() {
 
 type ActiveScanStateProps = {
   id: number
-  status: string
-  phase: string
+  status: ScanStatus
+  phase: ScanPhase
   isRefreshing: boolean
 }
 
@@ -262,6 +269,59 @@ function ActiveScanState({
           icon={<ShieldCheck className="size-4" />}
           label="Phase"
           value={formatEnumLabel(phase)}
+        />
+      </div>
+    </article>
+  )
+}
+
+type LoadingScanStateProps = {
+  id: number
+  phase: ScanPhase
+  isRefreshing: boolean
+}
+
+function LoadingScanState({
+  id,
+  phase,
+  isRefreshing,
+}: LoadingScanStateProps) {
+  const phaseLine = phaseMessageFor(phase)
+
+  return (
+    <article className="rounded-[32px] border border-white/12 bg-white/7 p-8 shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-sm sm:p-10">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.32em] text-emerald-200/62">
+            Scan in progress
+          </p>
+          <h2 className="mt-4 text-3xl font-semibold tracking-[-0.06em] text-white sm:text-4xl">
+            Scanning website...
+          </h2>
+          <p className="mt-4 text-base leading-7 text-emerald-50/74 sm:text-lg">
+            {phaseLine}
+          </p>
+        </div>
+        <div className="rounded-full border border-emerald-200/14 bg-emerald-300/10 px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] text-emerald-100/80">
+          {isRefreshing ? "Refreshing" : "Polling"}
+        </div>
+      </div>
+
+      <div className="mt-8 grid gap-3 sm:grid-cols-3">
+        <StatusCard
+          icon={<Radar className="size-4" />}
+          label="Scan"
+          value={`#${id}`}
+        />
+        <StatusCard
+          icon={<ShieldCheck className="size-4" />}
+          label="Phase"
+          value={formatEnumLabel(phase)}
+        />
+        <StatusCard
+          icon={<DatabaseZap className="size-4" />}
+          label="Progress"
+          value="Working"
         />
       </div>
     </article>
@@ -332,4 +392,20 @@ function formatEnumLabel(value: string) {
     .split("_")
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(" ")
+}
+
+function phaseMessageFor(phase: ScanPhase) {
+  switch (phase) {
+    case "accessibility":
+      return "Checking accessibility..."
+    case "content_safety":
+      return "Reviewing content safety..."
+    case "aggregating":
+      return "Generating dashboard..."
+    case "queued":
+    case "loading":
+    case "completed":
+    case "failed":
+      return "Scanning website..."
+  }
 }
