@@ -3,14 +3,16 @@ import { useState, type FormEvent, type ReactNode } from "react"
 import {
   ArrowRight,
   BadgeAlert,
+  CalendarClock,
   CircleAlert,
   DatabaseZap,
   EyeOff,
+  Globe2,
   Link2,
   ListChecks,
-  ShieldAlert,
   Radar,
   SearchCheck,
+  ShieldAlert,
   ShieldCheck,
 } from "lucide-react"
 
@@ -20,11 +22,11 @@ import { useCreateScan, useScan } from "@/lib/api/hooks"
 import {
   isTerminalScanStatus,
   type CategoryBreakdownItem,
+  type FindingDto,
+  type FindingSeverity,
   type ScanErrorReason,
   type ScanPhase,
   type ScanResponse,
-  type FindingDto,
-  type FindingSeverity,
 } from "@/lib/api/types"
 
 const URL_PLACEHOLDER =
@@ -84,23 +86,24 @@ function App() {
   }
 
   return (
-    <main className="relative isolate min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(39,144,110,0.22),_transparent_36%),linear-gradient(180deg,_#081310_0%,_#071f19_50%,_#04100d_100%)] text-foreground">
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(217,239,229,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(217,239,229,0.06)_1px,transparent_1px)] bg-[size:72px_72px] opacity-20" />
+    <main className="relative isolate min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(167,243,208,0.26),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(125,211,252,0.18),_transparent_26%),linear-gradient(180deg,_#f5fcf9_0%,_#e4f0eb_16%,_#bdd2cb_100%)] text-slate-950">
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(15,23,42,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.045)_1px,transparent_1px)] bg-[size:72px_72px] opacity-45" />
+      <div className="absolute inset-x-0 top-[-6rem] h-80 bg-[radial-gradient(circle,_rgba(255,255,255,0.88)_0%,_transparent_68%)] blur-3xl" />
       <div className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8 sm:px-10 lg:px-12">
-        <header className="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <header className="flex flex-col gap-4 border-b border-slate-900/8 pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="font-mono text-xs uppercase tracking-[0.36em] text-emerald-200/70">
+            <p className="font-mono text-xs uppercase tracking-[0.36em] text-emerald-950/55">
               ZeroClaw
             </p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-white sm:text-3xl">
+            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.05em] text-slate-950 sm:text-4xl">
               Website Risk Scanner
             </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-emerald-50/70 sm:text-base">
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-700 sm:text-base">
               Run a website review for accessibility and content-safety issues
               from one entry point.
             </p>
           </div>
-          <div className="rounded-full border border-emerald-300/20 bg-white/6 px-3 py-1 font-mono text-xs text-emerald-100/80 backdrop-blur">
+          <div className="rounded-full border border-emerald-900/10 bg-white/70 px-3 py-1 font-mono text-xs text-emerald-950/72 shadow-[0_10px_30px_rgba(15,23,42,0.06)] backdrop-blur">
             Scan launcher ready
           </div>
         </header>
@@ -108,18 +111,18 @@ function App() {
         <section className="py-10 sm:py-12">
           <form
             onSubmit={handleSubmit}
-            className="rounded-[30px] border border-white/12 bg-black/22 p-4 shadow-[0_28px_80px_rgba(0,0,0,0.32)] backdrop-blur sm:p-6"
+            className="rounded-[30px] border border-white/65 bg-white/74 p-4 shadow-[0_28px_80px_rgba(15,23,42,0.12)] backdrop-blur sm:p-6"
           >
             <div className="flex flex-col gap-5 lg:flex-row lg:items-end">
               <div className="min-w-0 flex-1">
                 <label
                   htmlFor="website-url"
-                  className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-200/65"
+                  className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-950/55"
                 >
                   Website URL
                 </label>
-                <div className="mt-3 flex items-center gap-3 rounded-[24px] border border-white/12 bg-white/8 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                  <Link2 className="size-4 shrink-0 text-emerald-200/65" />
+                <div className="mt-3 flex items-center gap-3 rounded-[24px] border border-slate-900/8 bg-white px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.55),0_10px_20px_rgba(15,23,42,0.04)]">
+                  <Link2 className="size-4 shrink-0 text-emerald-900/45" />
                   <input
                     id="website-url"
                     name="website-url"
@@ -136,18 +139,18 @@ function App() {
                     placeholder={URL_PLACEHOLDER}
                     aria-invalid={validationMessage !== null}
                     aria-describedby="website-url-hint website-url-error"
-                    className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-emerald-50/38 sm:text-base"
+                    className="min-w-0 flex-1 bg-transparent text-sm text-slate-950 outline-none placeholder:text-slate-400 sm:text-base"
                   />
                 </div>
                 <p
                   id="website-url-hint"
-                  className="mt-3 text-sm leading-6 text-emerald-50/58"
+                  className="mt-3 text-sm leading-6 text-slate-600"
                 >
                   Public `http://` and `https://` addresses are supported.
                 </p>
                 <p
                   id="website-url-error"
-                  className="mt-2 min-h-6 text-sm font-medium text-rose-200"
+                  className="mt-2 min-h-6 text-sm font-medium text-rose-700"
                 >
                   {validationMessage}
                 </p>
@@ -157,7 +160,7 @@ function App() {
                 type="submit"
                 size="lg"
                 disabled={createScan.isPending}
-                className="h-13 rounded-[20px] bg-emerald-300 px-5 text-emerald-950 hover:bg-emerald-200 disabled:bg-emerald-100/60"
+                className="h-13 rounded-[20px] bg-emerald-700 px-5 text-white shadow-[0_16px_40px_rgba(4,120,87,0.2)] hover:bg-emerald-600 disabled:bg-emerald-300/70"
               >
                 {createScan.isPending ? "Submitting..." : "Analyze Website"}
                 <ArrowRight className="size-4" />
@@ -225,14 +228,14 @@ type StatusCardProps = {
 
 function StatusCard({ icon, label, value }: StatusCardProps) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/18 p-4">
-      <div className="mb-4 inline-flex rounded-xl border border-white/10 bg-white/8 p-2 text-emerald-100">
+    <div className="rounded-[22px] border border-slate-900/8 bg-white/74 p-4 shadow-[0_14px_40px_rgba(15,23,42,0.08)]">
+      <div className="mb-4 inline-flex rounded-xl border border-emerald-900/10 bg-emerald-50 p-2 text-emerald-800">
         {icon}
       </div>
-      <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-emerald-100/55">
+      <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-emerald-950/48">
         {label}
       </p>
-      <p className="mt-2 text-lg font-semibold tracking-[-0.04em] text-white">
+      <p className="mt-2 text-lg font-semibold tracking-[-0.04em] text-slate-950">
         {value}
       </p>
     </div>
@@ -246,28 +249,28 @@ type InfoPanelProps = {
 
 function InfoPanel({ title, body }: InfoPanelProps) {
   return (
-    <article className="rounded-[24px] border border-white/10 bg-white/6 p-5 backdrop-blur-sm">
-      <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-200/60">
+    <article className="rounded-[24px] border border-white/60 bg-white/72 p-5 shadow-[0_16px_44px_rgba(15,23,42,0.08)] backdrop-blur-sm">
+      <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-950/52">
         {title}
       </p>
-      <p className="mt-3 text-sm leading-6 text-emerald-50/75">{body}</p>
+      <p className="mt-3 text-sm leading-6 text-slate-700">{body}</p>
     </article>
   )
 }
 
 function EmptyState() {
   return (
-    <article className="rounded-[32px] border border-dashed border-white/14 bg-white/5 p-8 shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-sm sm:p-10">
-      <div className="inline-flex rounded-2xl border border-emerald-200/15 bg-emerald-300/12 p-3 text-emerald-100">
+    <article className="rounded-[32px] border border-dashed border-emerald-900/14 bg-white/72 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.1)] backdrop-blur-sm sm:p-10">
+      <div className="inline-flex rounded-2xl border border-emerald-900/12 bg-emerald-50 p-3 text-emerald-800">
         <SearchCheck className="size-6" />
       </div>
-      <p className="mt-6 font-mono text-xs uppercase tracking-[0.32em] text-emerald-200/62">
+      <p className="mt-6 font-mono text-xs uppercase tracking-[0.32em] text-emerald-950/52">
         Empty state
       </p>
-      <h2 className="mt-4 text-3xl font-semibold tracking-[-0.06em] text-white sm:text-4xl">
+      <h2 className="mt-4 text-3xl font-semibold tracking-[-0.06em] text-slate-950 sm:text-4xl">
         No scan is active yet.
       </h2>
-      <p className="mt-4 max-w-2xl text-base leading-7 text-emerald-50/72">
+      <p className="mt-4 max-w-2xl text-base leading-7 text-slate-700">
         Enter a website URL above to start analyzing accessibility issues and
         inappropriate content risks. Your latest scan will take over this space
         once the request is submitted.
@@ -323,23 +326,23 @@ function ErrorScanState({
   onTryAgain,
 }: ErrorScanStateProps) {
   return (
-    <article className="rounded-[32px] border border-rose-200/12 bg-[linear-gradient(180deg,rgba(95,20,26,0.35)_0%,rgba(18,6,8,0.72)_100%)] p-8 shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-sm sm:p-10">
+    <article className="rounded-[32px] border border-rose-200/45 bg-[linear-gradient(180deg,rgba(255,242,244,0.92)_0%,rgba(255,233,237,0.86)_100%)] p-8 shadow-[0_24px_80px_rgba(127,29,29,0.12)] backdrop-blur-sm sm:p-10">
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <div className="inline-flex rounded-2xl border border-rose-200/15 bg-rose-300/12 p-3 text-rose-100">
+          <div className="inline-flex rounded-2xl border border-rose-700/10 bg-rose-100 p-3 text-rose-700">
             <CircleAlert className="size-6" />
           </div>
-          <p className="mt-6 font-mono text-xs uppercase tracking-[0.32em] text-rose-100/62">
+          <p className="mt-6 font-mono text-xs uppercase tracking-[0.32em] text-rose-800/55">
             Scan failed
           </p>
-          <h2 className="mt-4 text-3xl font-semibold tracking-[-0.06em] text-white sm:text-4xl">
+          <h2 className="mt-4 text-3xl font-semibold tracking-[-0.06em] text-slate-950 sm:text-4xl">
             We could not scan this website. Please check the URL and try again.
           </h2>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-rose-50/78 sm:text-lg">
+          <p className="mt-4 max-w-2xl text-base leading-7 text-slate-700 sm:text-lg">
             {errorReasonMessageFor(errorReason)}
           </p>
         </div>
-        <div className="rounded-full border border-rose-200/14 bg-rose-300/10 px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] text-rose-100/80">
+        <div className="rounded-full border border-rose-700/10 bg-white/75 px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] text-rose-900/72">
           {isRefreshing ? "Refreshing" : "Stopped"}
         </div>
       </div>
@@ -349,7 +352,7 @@ function ErrorScanState({
           type="button"
           size="lg"
           onClick={onTryAgain}
-          className="bg-emerald-300 text-emerald-950 hover:bg-emerald-200"
+          className="bg-emerald-700 text-white hover:bg-emerald-600"
         >
           Try Again
           <ArrowRight className="size-4" />
@@ -375,21 +378,21 @@ function LoadingScanState({
   return (
     <article
       data-testid="loading-screen"
-      className="rounded-[32px] border border-white/12 bg-white/7 p-8 shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-sm sm:p-10"
+      className="rounded-[32px] border border-white/60 bg-white/74 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.1)] backdrop-blur-sm sm:p-10"
     >
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.32em] text-emerald-200/62">
+          <p className="font-mono text-xs uppercase tracking-[0.32em] text-emerald-950/52">
             Scan in progress
           </p>
-          <h2 className="mt-4 text-3xl font-semibold tracking-[-0.06em] text-white sm:text-4xl">
+          <h2 className="mt-4 text-3xl font-semibold tracking-[-0.06em] text-slate-950 sm:text-4xl">
             Scanning website...
           </h2>
-          <p className="mt-4 text-base leading-7 text-emerald-50/74 sm:text-lg">
+          <p className="mt-4 text-base leading-7 text-slate-700 sm:text-lg">
             {phaseLine}
           </p>
         </div>
-        <div className="rounded-full border border-emerald-200/14 bg-emerald-300/10 px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] text-emerald-100/80">
+        <div className="rounded-full border border-emerald-900/10 bg-emerald-50 px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] text-emerald-950/70">
           {isRefreshing ? "Refreshing" : "Polling"}
         </div>
       </div>
@@ -431,7 +434,7 @@ function Dashboard({
   const totalIssues = scan.accessibility.length + scan.inappropriate.length
 
   return (
-    <div data-testid="dashboard" className="grid gap-6">
+    <div data-testid="dashboard" className="grid gap-5 xl:gap-6">
       <WebsiteSummaryCard
         url={scan.url}
         createdAt={scan.created_at}
@@ -496,7 +499,10 @@ function Dashboard({
               />
               <FindingDetail
                 label="Excerpt"
-                value={finding.example_excerpt ?? "No excerpt was provided for this finding."}
+                value={
+                  finding.example_excerpt ??
+                  "No excerpt was provided for this finding."
+                }
               />
               <FindingDetail
                 label="Suggested action"
@@ -541,21 +547,26 @@ function WebsiteSummaryCard({
   return (
     <article
       data-testid="dashboard-summary"
-      className="rounded-[32px] border border-white/12 bg-white/7 p-8 shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-sm sm:p-10"
+      className="rounded-[32px] border border-white/65 bg-[linear-gradient(135deg,rgba(255,255,255,0.86)_0%,rgba(241,251,247,0.9)_54%,rgba(226,244,238,0.95)_100%)] p-8 shadow-[0_28px_80px_rgba(15,23,42,0.12)] backdrop-blur-sm sm:p-10"
     >
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.32em] text-emerald-200/62">
+          <p className="font-mono text-xs uppercase tracking-[0.32em] text-emerald-950/52">
             Dashboard
           </p>
-          <h2 className="mt-4 text-3xl font-semibold tracking-[-0.06em] text-white sm:text-4xl">
+          <h2 className="mt-3 text-3xl font-semibold tracking-[-0.07em] text-slate-950 sm:text-[2.65rem]">
             Scan complete.
           </h2>
-          <p className="mt-4 break-all text-base leading-7 text-emerald-50/74 sm:text-lg">
-            {url}
+          <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-emerald-900/10 bg-white/78 px-3 py-1.5 text-sm text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
+            <Globe2 className="size-4 shrink-0 text-emerald-700" />
+            <span className="break-all">{url}</span>
+          </div>
+          <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
+            Snapshot of the current scan, issue totals, and next-step guidance
+            from the completed analysis.
           </p>
         </div>
-        <div className="rounded-full border border-emerald-200/14 bg-emerald-300/10 px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] text-emerald-100/80">
+        <div className="rounded-full border border-emerald-900/10 bg-emerald-50 px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] text-emerald-950/70">
           {isRefreshing ? "Refreshing" : "Complete"}
         </div>
       </div>
@@ -566,7 +577,7 @@ function WebsiteSummaryCard({
           size="lg"
           onClick={onRescan}
           disabled={isRescanning}
-          className="bg-emerald-300 text-emerald-950 hover:bg-emerald-200 disabled:bg-emerald-100/60"
+          className="bg-emerald-700 text-white shadow-[0_18px_40px_rgba(4,120,87,0.18)] hover:bg-emerald-600 disabled:bg-emerald-300/70"
         >
           {isRescanning ? "Re-scanning..." : "Re-scan"}
           <ArrowRight className="size-4" />
@@ -574,18 +585,19 @@ function WebsiteSummaryCard({
       </div>
 
       <div className="mt-8 grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
-        <div className="rounded-[24px] border border-white/10 bg-black/18 p-5">
-          <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-emerald-100/55">
-            Scan timestamp
-          </p>
-          <p className="mt-3 text-lg font-semibold tracking-[-0.04em] text-white">
+        <div className="rounded-[24px] border border-slate-900/8 bg-white/80 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.06)]">
+          <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.28em] text-emerald-950/48">
+            <CalendarClock className="size-4 text-emerald-700/80" />
+            <span>Scan timestamp</span>
+          </div>
+          <p className="mt-3 text-xl font-semibold tracking-[-0.04em] text-slate-950">
             {formatScanTimestamp(createdAt)}
           </p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-1">
-          <div className={`rounded-[24px] border p-5 ${riskTone.panelClass}`}>
-            <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-white/55">
+          <div className={`rounded-[24px] border p-5 shadow-[0_16px_40px_rgba(15,23,42,0.06)] ${riskTone.panelClass}`}>
+            <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-900/48">
               Risk level
             </p>
             <div
@@ -596,12 +608,15 @@ function WebsiteSummaryCard({
             </div>
           </div>
 
-          <div className="rounded-[24px] border border-white/10 bg-black/18 p-5">
-            <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-emerald-100/55">
+          <div className="rounded-[24px] border border-slate-900/8 bg-white/80 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.06)]">
+            <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-emerald-950/48">
               Total issues
             </p>
-            <p className="mt-3 text-3xl font-semibold tracking-[-0.06em] text-white">
+            <p className="mt-2 text-4xl font-semibold tracking-[-0.08em] text-slate-950">
               {totalIssues}
+            </p>
+            <p className="mt-2 text-sm text-slate-600">
+              Combined accessibility and content-safety findings from this pass.
             </p>
           </div>
         </div>
@@ -634,31 +649,38 @@ function ScoreCard({
   return (
     <article
       data-testid={testId}
-      className={`rounded-[28px] border p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm ${tone.panelClass}`}
+      className={`rounded-[28px] border p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-sm ${tone.panelClass}`}
     >
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="font-mono text-xs uppercase tracking-[0.28em] text-white/60">
+        <div className="space-y-3">
+          <p className="font-mono text-xs uppercase tracking-[0.28em] text-slate-900/52">
             {title}
           </p>
-          <p
-            data-testid={`${testId}-value`}
-            className="mt-4 text-5xl font-semibold tracking-[-0.08em] text-white"
-          >
-            {value}
-          </p>
+          <div className="flex items-end gap-3">
+            <p
+              data-testid={`${testId}-value`}
+              className="text-5xl font-semibold tracking-[-0.09em] text-slate-950"
+            >
+              {value}
+            </p>
+            <span className="pb-1 font-mono text-[11px] uppercase tracking-[0.22em] text-slate-900/42">
+              issues
+            </span>
+          </div>
         </div>
-        <div className={`rounded-2xl border p-3 ${tone.iconClass}`}>{icon}</div>
+        <div className={`rounded-[20px] border p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] ${tone.iconClass}`}>
+          {icon}
+        </div>
       </div>
 
-      <p className="mt-5 text-sm leading-6 text-white/72">{explanation}</p>
+      <p className="mt-4 text-sm leading-6 text-slate-700">{explanation}</p>
 
       <div className="mt-6">
-        <div className="mb-2 flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.24em] text-white/52">
-          <span>Severity</span>
+        <div className="mb-2.5 flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.24em] text-slate-900/45">
+          <span>Relative severity</span>
           <span>{percentage}%</span>
         </div>
-        <div className="h-3 overflow-hidden rounded-full bg-black/22">
+        <div className="h-3 overflow-hidden rounded-full bg-slate-900/8">
           <div
             className={`h-full rounded-full transition-[width] duration-500 ${tone.barClass}`}
             style={{ width: `${Math.max(8, percentage)}%` }}
@@ -691,24 +713,24 @@ function FindingsSection({
   return (
     <section
       data-testid={testId}
-      className="rounded-[28px] border border-white/12 bg-white/7 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm"
+      className="rounded-[28px] border border-white/60 bg-white/74 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-sm"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-200/62">
+          <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-950/52">
             {title}
           </p>
-          <p className="mt-3 max-w-xl text-sm leading-6 text-emerald-50/74">
+          <p className="mt-3 max-w-xl text-sm leading-6 text-slate-700">
             {description}
           </p>
         </div>
-        <div className="rounded-2xl border border-white/10 bg-black/18 p-3 text-emerald-100">
+        <div className="rounded-2xl border border-emerald-900/10 bg-emerald-50 p-3 text-emerald-800 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
           {icon}
         </div>
       </div>
 
       {findings.length === 0 ? (
-        <div className="mt-6 rounded-[24px] border border-dashed border-white/12 bg-black/16 p-5 text-sm leading-6 text-emerald-50/68">
+        <div className="mt-6 rounded-[24px] border border-dashed border-slate-900/10 bg-slate-50/70 p-5 text-sm leading-6 text-slate-600">
           {emptyMessage}
         </div>
       ) : (
@@ -716,14 +738,14 @@ function FindingsSection({
           {findings.map((finding) => (
             <article
               key={finding.id}
-              className="rounded-[24px] border border-white/10 bg-black/18 p-5"
+              className="rounded-[24px] border border-slate-900/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.9)_0%,rgba(245,250,248,0.94)_100%)] p-5 shadow-[0_14px_32px_rgba(15,23,42,0.05)]"
             >
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <h3 className="text-lg font-semibold tracking-[-0.04em] text-white">
+                  <h3 className="text-lg font-semibold tracking-[-0.04em] text-slate-950">
                     {finding.title}
                   </h3>
-                  <p className="mt-3 text-sm leading-6 text-emerald-50/74">
+                  <p className="mt-2.5 text-sm leading-6 text-slate-700">
                     {finding.summary}
                   </p>
                 </div>
@@ -747,35 +769,36 @@ function CategoryBreakdownCard({ breakdown }: CategoryBreakdownCardProps) {
   return (
     <section
       data-testid="category-breakdown"
-      className="rounded-[28px] border border-white/12 bg-white/7 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm"
+      className="rounded-[28px] border border-white/60 bg-white/74 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-sm"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-200/62">
+          <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-950/52">
             Content Analysis Breakdown
           </p>
-          <p className="mt-3 max-w-xl text-sm leading-6 text-emerald-50/74">
-            Category counts from the completed scan response, including zero-count rows returned by the server.
+          <p className="mt-3 max-w-xl text-sm leading-6 text-slate-700">
+            Category counts from the completed scan response, including
+            zero-count rows returned by the server.
           </p>
         </div>
-        <div className="rounded-2xl border border-white/10 bg-black/18 p-3 text-emerald-100">
+        <div className="rounded-2xl border border-emerald-900/10 bg-emerald-50 p-3 text-emerald-800 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
           <BadgeAlert className="size-5" />
         </div>
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-[24px] border border-white/10 bg-black/18">
-        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-white/10 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.24em] text-emerald-100/52">
+      <div className="mt-6 overflow-hidden rounded-[24px] border border-slate-900/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(244,248,247,0.95)_100%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]">
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-900/8 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.24em] text-slate-900/48">
           <span>Category</span>
           <span>Count</span>
         </div>
-        <div className="divide-y divide-white/8">
+        <div className="divide-y divide-slate-900/6">
           {breakdown.map((item) => (
             <div
               key={item.category}
-              className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3 text-sm text-white/78"
+              className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3.5 text-sm text-slate-700"
             >
               <span>{formatEnumLabel(item.category)}</span>
-              <span className="font-mono text-emerald-100/82">{item.count}</span>
+              <span className="font-mono text-emerald-950/78">{item.count}</span>
             </div>
           ))}
         </div>
@@ -792,24 +815,25 @@ function RecommendedActionsCard({ actions }: RecommendedActionsCardProps) {
   return (
     <section
       data-testid="recommended-actions"
-      className="rounded-[28px] border border-white/12 bg-white/7 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm"
+      className="rounded-[28px] border border-white/60 bg-white/74 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)] backdrop-blur-sm"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-200/62">
+          <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-950/52">
             Recommended Actions
           </p>
-          <p className="mt-3 max-w-xl text-sm leading-6 text-emerald-50/74">
-            Remediation lines supplied by the server for the current mix of findings.
+          <p className="mt-3 max-w-xl text-sm leading-6 text-slate-700">
+            Remediation lines supplied by the server for the current mix of
+            findings.
           </p>
         </div>
-        <div className="rounded-2xl border border-white/10 bg-black/18 p-3 text-emerald-100">
+        <div className="rounded-2xl border border-emerald-900/10 bg-emerald-50 p-3 text-emerald-800 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
           <ShieldCheck className="size-5" />
         </div>
       </div>
 
       {actions.length === 0 ? (
-        <div className="mt-6 rounded-[24px] border border-dashed border-white/12 bg-black/16 p-5 text-sm leading-6 text-emerald-50/68">
+        <div className="mt-6 rounded-[24px] border border-dashed border-slate-900/10 bg-slate-50/70 p-5 text-sm leading-6 text-slate-600">
           No recommended actions were returned for this scan.
         </div>
       ) : (
@@ -817,12 +841,12 @@ function RecommendedActionsCard({ actions }: RecommendedActionsCardProps) {
           {actions.map((action, index) => (
             <li
               key={`${index}-${action}`}
-              className="flex gap-3 rounded-[22px] border border-white/10 bg-black/18 p-4"
+              className="flex gap-3 rounded-[22px] border border-slate-900/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.9)_0%,rgba(245,250,248,0.94)_100%)] p-4 shadow-[0_14px_30px_rgba(15,23,42,0.05)]"
             >
-              <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-emerald-200/14 bg-emerald-300/12 font-mono text-[11px] text-emerald-100">
+              <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-emerald-900/10 bg-emerald-50 font-mono text-[11px] text-emerald-900/82">
                 {index + 1}
               </span>
-              <p className="text-sm leading-6 text-white/78">{action}</p>
+              <p className="text-sm leading-6 text-slate-700">{action}</p>
             </li>
           ))}
         </ol>
@@ -838,11 +862,11 @@ type FindingDetailProps = {
 
 function FindingDetail({ label, value }: FindingDetailProps) {
   return (
-    <div className="rounded-[18px] border border-white/8 bg-white/6 p-4">
-      <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-emerald-100/52">
+    <div className="rounded-[18px] border border-slate-900/8 bg-slate-50/72 p-4">
+      <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-slate-900/45">
         {label}
       </p>
-      <p className="mt-2 text-sm leading-6 text-white/76">{value}</p>
+      <p className="mt-2 text-sm leading-6 text-slate-700">{value}</p>
     </div>
   )
 }
@@ -856,7 +880,7 @@ function SeverityBadge({ severity }: SeverityBadgeProps) {
 
   return (
     <span
-      className={`inline-flex shrink-0 rounded-full border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.22em] ${tone}`}
+      className={`inline-flex shrink-0 rounded-full border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.22em] shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] ${tone}`}
     >
       {severity}
     </span>
@@ -865,17 +889,17 @@ function SeverityBadge({ severity }: SeverityBadgeProps) {
 
 function StatusPanel() {
   return (
-    <article className="rounded-[28px] border border-white/12 bg-white/8 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur-sm">
-      <div className="mb-10 flex items-start justify-between">
+    <article className="rounded-[28px] border border-white/60 bg-white/72 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.1)] backdrop-blur-sm">
+      <div className="mb-8 flex items-start justify-between">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.3em] text-emerald-200/70">
+          <p className="font-mono text-xs uppercase tracking-[0.3em] text-emerald-950/58">
             Scan setup
           </p>
-          <p className="mt-3 text-2xl font-semibold tracking-[-0.05em] text-white">
+          <p className="mt-3 text-2xl font-semibold tracking-[-0.05em] text-slate-950">
             Front door wired
           </p>
         </div>
-        <div className="rounded-2xl border border-emerald-200/15 bg-emerald-300/14 p-3 text-emerald-100">
+        <div className="rounded-2xl border border-emerald-900/12 bg-emerald-50 p-3 text-emerald-800">
           <DatabaseZap className="size-6" />
         </div>
       </div>
@@ -989,24 +1013,27 @@ function scoreToneFor(value: number, weighted: boolean): ScoreTone {
 
   if (value >= highThreshold) {
     return {
-      panelClass: "border-rose-200/14 bg-[linear-gradient(180deg,rgba(112,29,36,0.45)_0%,rgba(22,7,9,0.72)_100%)]",
-      iconClass: "border-rose-200/14 bg-rose-300/14 text-rose-100",
-      barClass: "bg-rose-300",
+      panelClass:
+        "border-rose-300/40 bg-[linear-gradient(180deg,rgba(255,242,244,0.92)_0%,rgba(255,228,233,0.88)_100%)]",
+      iconClass: "border-rose-700/10 bg-rose-100 text-rose-700",
+      barClass: "bg-rose-600",
     }
   }
 
   if (value >= mediumThreshold) {
     return {
-      panelClass: "border-amber-200/14 bg-[linear-gradient(180deg,rgba(118,78,12,0.42)_0%,rgba(22,15,4,0.72)_100%)]",
-      iconClass: "border-amber-200/14 bg-amber-300/14 text-amber-100",
-      barClass: "bg-amber-300",
+      panelClass:
+        "border-amber-300/40 bg-[linear-gradient(180deg,rgba(255,249,235,0.94)_0%,rgba(254,240,199,0.88)_100%)]",
+      iconClass: "border-amber-700/10 bg-amber-100 text-amber-700",
+      barClass: "bg-amber-500",
     }
   }
 
   return {
-    panelClass: "border-emerald-200/14 bg-[linear-gradient(180deg,rgba(16,104,74,0.36)_0%,rgba(7,19,15,0.72)_100%)]",
-    iconClass: "border-emerald-200/14 bg-emerald-300/14 text-emerald-100",
-    barClass: "bg-emerald-300",
+    panelClass:
+      "border-emerald-300/40 bg-[linear-gradient(180deg,rgba(236,253,245,0.94)_0%,rgba(209,250,229,0.88)_100%)]",
+    iconClass: "border-emerald-700/10 bg-emerald-100 text-emerald-700",
+    barClass: "bg-emerald-600",
   }
 }
 
@@ -1014,28 +1041,28 @@ function riskToneFor(riskLevel: ScanResponse["risk_level"]) {
   switch (riskLevel) {
     case "critical":
       return {
-        panelClass: "border-rose-200/14 bg-rose-300/10",
-        badgeClass: "border-rose-200/16 bg-rose-300/14 text-rose-100",
+        panelClass: "border-fuchsia-300/45 bg-fuchsia-50/82",
+        badgeClass: "border-fuchsia-700/15 bg-fuchsia-100 text-fuchsia-900",
       }
     case "high":
       return {
-        panelClass: "border-orange-200/14 bg-orange-300/10",
-        badgeClass: "border-orange-200/16 bg-orange-300/14 text-orange-100",
+        panelClass: "border-rose-300/45 bg-rose-50/82",
+        badgeClass: "border-rose-700/15 bg-rose-100 text-rose-900",
       }
     case "medium":
       return {
-        panelClass: "border-amber-200/14 bg-amber-300/10",
-        badgeClass: "border-amber-200/16 bg-amber-300/14 text-amber-100",
+        panelClass: "border-amber-300/45 bg-amber-50/82",
+        badgeClass: "border-amber-700/15 bg-amber-100 text-amber-900",
       }
     case "low":
       return {
-        panelClass: "border-emerald-200/14 bg-emerald-300/10",
-        badgeClass: "border-emerald-200/16 bg-emerald-300/14 text-emerald-100",
+        panelClass: "border-emerald-300/45 bg-emerald-50/82",
+        badgeClass: "border-emerald-700/15 bg-emerald-100 text-emerald-900",
       }
     case null:
       return {
-        panelClass: "border-white/10 bg-white/6",
-        badgeClass: "border-white/10 bg-white/8 text-white/72",
+        panelClass: "border-slate-300/45 bg-white/78",
+        badgeClass: "border-slate-400/20 bg-slate-100 text-slate-800",
       }
   }
 }
@@ -1043,12 +1070,12 @@ function riskToneFor(riskLevel: ScanResponse["risk_level"]) {
 function severityToneFor(severity: FindingSeverity) {
   switch (severity) {
     case "critical":
-      return "border-fuchsia-200/18 bg-fuchsia-300/14 text-fuchsia-100"
+      return "border-fuchsia-700/15 bg-fuchsia-100 text-fuchsia-950"
     case "high":
-      return "border-rose-200/18 bg-rose-300/14 text-rose-100"
+      return "border-rose-700/15 bg-rose-100 text-rose-950"
     case "medium":
-      return "border-amber-200/18 bg-amber-300/14 text-amber-100"
+      return "border-amber-700/15 bg-amber-100 text-amber-950"
     case "low":
-      return "border-emerald-200/18 bg-emerald-300/14 text-emerald-100"
+      return "border-emerald-700/15 bg-emerald-100 text-emerald-950"
   }
 }
