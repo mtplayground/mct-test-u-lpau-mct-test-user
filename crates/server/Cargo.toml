@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 async-trait.workspace = true
 axum.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 time.workspace = true
 tokio.workspace = true
@@ -14,13 +15,13 @@ tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 zeroclaw-ai = { path = "../ai" }
+zeroclaw-browser = { path = "../browser" }
 zeroclaw-core = { path = "../core" }
 zeroclaw-storage = { path = "../storage" }
 zeroclaw-worker = { path = "../worker" }
+url.workspace = true
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serial_test = "3"
 serde_json = "1"
 sqlx.workspace = true
-zeroclaw-browser = { path = "../browser" }

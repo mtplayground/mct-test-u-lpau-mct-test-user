@@ -28,7 +28,7 @@ export class ApiClient {
 
   constructor(options: ApiClientOptions = {}) {
     this.baseUrl = sanitizeBaseUrl(options.baseUrl ?? DEFAULT_API_BASE_PATH)
-    this.fetchImpl = options.fetchImpl ?? fetch
+    this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis)
   }
 
   async createScan(request: CreateScanRequest): Promise<CreateScanResponse> {

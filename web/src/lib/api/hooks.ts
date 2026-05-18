@@ -53,6 +53,8 @@ export function useScan(scanId: number | null, options?: UseScanOptions) {
       return apiClient.getScan(scanId)
     },
     enabled: scanId !== null,
+    retry: scanId === null ? false : 20,
+    retryDelay: 1_000,
     refetchInterval: (query) => {
       const scan = query.state.data
 
