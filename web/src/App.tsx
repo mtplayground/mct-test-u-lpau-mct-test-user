@@ -60,6 +60,23 @@ function App() {
     }
   }
 
+  async function handleRescan(nextUrl: string) {
+    try {
+      const response = await createScan.mutateAsync({
+        url: nextUrl,
+        force: true,
+      })
+
+      setUrl(nextUrl)
+      setValidationMessage(null)
+      setActiveScanId(response.id)
+    } catch (error) {
+      if (error instanceof ApiClientError) {
+        setValidationMessage(error.message)
+      }
+    }
+  }
+
   return (
     <main className="relative isolate min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(39,144,110,0.22),_transparent_36%),linear-gradient(180deg,_#081310_0%,_#071f19_50%,_#04100d_100%)] text-foreground">
       <div className="absolute inset-0 bg-[linear-gradient(rgba(217,239,229,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(217,239,229,0.06)_1px,transparent_1px)] bg-[size:72px_72px] opacity-20" />
@@ -157,6 +174,8 @@ function App() {
               <TerminalScanState
                 scan={activeScan.data}
                 isRefreshing={activeScan.isFetching}
+                isRescanning={createScan.isPending}
+                onRescan={handleRescan}
                 onTryAgain={() => {
                   setActiveScanId(null)
                   setValidationMessage(null)
@@ -248,12 +267,16 @@ function EmptyState() {
 type TerminalScanStateProps = {
   scan: ScanResponse
   isRefreshing: boolean
+  isRescanning: boolean
+  onRescan: (url: string) => Promise<void>
   onTryAgain: () => void
 }
 
 function TerminalScanState({
   scan,
   isRefreshing,
+  isRescanning,
+  onRescan,
   onTryAgain,
 }: TerminalScanStateProps) {
   if (scan.status === "failed") {
@@ -266,7 +289,14 @@ function TerminalScanState({
     )
   }
 
-  return <CompletedScanState scan={scan} isRefreshing={isRefreshing} />
+  return (
+    <Dashboard
+      scan={scan}
+      isRefreshing={isRefreshing}
+      isRescanning={isRescanning}
+      onRescan={onRescan}
+    />
+  )
 }
 
 type ErrorScanStateProps = {
@@ -370,15 +400,19 @@ function LoadingScanState({
   )
 }
 
-type CompletedScanStateProps = {
+type DashboardProps = {
   scan: ScanResponse
   isRefreshing: boolean
+  isRescanning: boolean
+  onRescan: (url: string) => Promise<void>
 }
 
-function CompletedScanState({
+function Dashboard({
   scan,
   isRefreshing,
-}: CompletedScanStateProps) {
+  isRescanning,
+  onRescan,
+}: DashboardProps) {
   const totalIssues = scan.accessibility.length + scan.inappropriate.length
 
   return (
@@ -389,6 +423,8 @@ function CompletedScanState({
         riskLevel={scan.risk_level}
         totalIssues={totalIssues}
         isRefreshing={isRefreshing}
+        isRescanning={isRescanning}
+        onRescan={() => onRescan(scan.url)}
       />
       <div className="grid gap-4 xl:grid-cols-2">
         <ScoreCard
@@ -468,6 +504,8 @@ type WebsiteSummaryCardProps = {
   riskLevel: ScanResponse["risk_level"]
   totalIssues: number
   isRefreshing: boolean
+  isRescanning: boolean
+  onRescan: () => void
 }
 
 function WebsiteSummaryCard({
@@ -476,6 +514,8 @@ function WebsiteSummaryCard({
   riskLevel,
   totalIssues,
   isRefreshing,
+  isRescanning,
+  onRescan,
 }: WebsiteSummaryCardProps) {
   const riskTone = riskToneFor(riskLevel)
 
@@ -484,7 +524,7 @@ function WebsiteSummaryCard({
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.32em] text-emerald-200/62">
-            Website summary
+            Dashboard
           </p>
           <h2 className="mt-4 text-3xl font-semibold tracking-[-0.06em] text-white sm:text-4xl">
             Scan complete.
@@ -496,6 +536,19 @@ function WebsiteSummaryCard({
         <div className="rounded-full border border-emerald-200/14 bg-emerald-300/10 px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] text-emerald-100/80">
           {isRefreshing ? "Refreshing" : "Complete"}
         </div>
+      </div>
+
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+        <Button
+          type="button"
+          size="lg"
+          onClick={onRescan}
+          disabled={isRescanning}
+          className="bg-emerald-300 text-emerald-950 hover:bg-emerald-200 disabled:bg-emerald-100/60"
+        >
+          {isRescanning ? "Re-scanning..." : "Re-scan"}
+          <ArrowRight className="size-4" />
+        </Button>
       </div>
 
       <div className="mt-8 grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
