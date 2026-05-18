@@ -2773,6 +2773,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "url",
+ "zeroclaw-core",
 ]
 
 [[package]]

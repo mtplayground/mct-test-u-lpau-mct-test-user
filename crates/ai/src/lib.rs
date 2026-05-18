@@ -1,8 +1,15 @@
+mod content_safety;
+
 use std::borrow::Cow;
 
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
+
+pub use content_safety::{
+    map_content_safety_findings, parse_content_safety_response, ContentSafetyCategory,
+    ContentSafetyFinding, ContentSafetyParseError, ParsedContentSafetyResponse,
+};
 
 pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com/v1";
 pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-6";

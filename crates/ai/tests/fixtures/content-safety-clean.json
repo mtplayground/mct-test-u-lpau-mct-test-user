@@ -1,0 +1,27 @@
+Here is the requested assessment.
+
+{
+  "summary": "The page contains weapon sales language.",
+  "findings": [
+    {
+      "title": "Weapon sales promotion",
+      "category": "weapons",
+      "severity": "high",
+      "summary": "The page advertises the purchase of tactical rifles.",
+      "example_excerpt": "Buy tactical rifles today with fast shipping.",
+      "why_unsafe": "It promotes acquiring real-world weapons.",
+      "recommended_action": "Remove direct sales language and add clear policy restrictions."
+    },
+    {
+      "title": "Profanity in headline",
+      "category": "profanity",
+      "severity": "medium",
+      "summary": "A headline uses strong profanity to attract attention.",
+      "example_excerpt": "This damn deal won't last.",
+      "why_unsafe": "Profanity may violate brand-safety requirements.",
+      "recommended_action": "Replace the profanity with neutral marketing language."
+    }
+  ]
+}
+
+End of response.
