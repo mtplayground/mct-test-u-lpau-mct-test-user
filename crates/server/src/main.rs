@@ -1,9 +1,9 @@
 mod config;
 
-use std::{net::{IpAddr, Ipv4Addr, SocketAddr}, sync::Arc};
+use std::{net::{IpAddr, Ipv4Addr, SocketAddr}, str::FromStr, sync::Arc};
 
 use axum::{
-    extract::{Request, State},
+    extract::{Path, Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -19,7 +19,8 @@ use tower_http::{
 use tracing::{info, Level};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use zeroclaw_core::{
-    validate_scan_url, NewScan, ScanPhase, ScanStatus, UrlValidationError,
+    category_breakdown, validate_scan_url, Category, Finding, FindingKind, NewScan, Scan,
+    ScanPhase, ScanStatus, UrlValidationError,
 };
 use zeroclaw_storage::{Database, DatabaseError, Repository, RepositoryError};
 
@@ -76,6 +77,7 @@ fn api_router() -> Router<AppState> {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/scans", post(create_scan))
+        .route("/scans/{id}", get(get_scan))
         .fallback(api_not_found)
 }
 
@@ -133,6 +135,26 @@ async fn create_scan(
         id: scan.id,
         cached: false,
     }))
+}
+
+async fn get_scan(
+    State(state): State<AppState>,
+    Path(scan_id): Path<i64>,
+) -> Result<Json<GetScanResponse>, ApiError> {
+    let scan = state
+        .repository
+        .find_scan_by_id(scan_id)
+        .await
+        .map_err(ApiError::Repository)?
+        .ok_or(ApiError::NotFound)?;
+
+    let findings = state
+        .repository
+        .list_findings_for_scan(scan.id)
+        .await
+        .map_err(ApiError::Repository)?;
+
+    Ok(Json(build_scan_response(scan, findings)))
 }
 
 fn spawn_worker_stub(scan_id: i64) {
@@ -222,12 +244,46 @@ struct CreateScanResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct GetScanResponse {
+    id: i64,
+    status: String,
+    phase: String,
+    accessibility_score: Option<i32>,
+    inappropriate_score: Option<i32>,
+    risk_level: Option<String>,
+    error_reason: Option<String>,
+    accessibility: Vec<FindingResponse>,
+    inappropriate: Vec<FindingResponse>,
+    category_breakdown: Option<Vec<CategoryBreakdownItem>>,
+}
+
+#[derive(Debug, Serialize)]
+struct FindingResponse {
+    id: i64,
+    title: String,
+    category: String,
+    severity: String,
+    summary: String,
+    location: Option<String>,
+    suggestion: Option<String>,
+    example_excerpt: Option<String>,
+    why_unsafe: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct CategoryBreakdownItem {
+    category: String,
+    count: usize,
+}
+
+#[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: String,
 }
 
 #[derive(Debug)]
 enum ApiError {
+    NotFound,
     Repository(RepositoryError),
     Validation(ValidationError),
 }
@@ -235,6 +291,13 @@ enum ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         match self {
+            Self::NotFound => (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "Scan not found.".to_owned(),
+                }),
+            )
+                .into_response(),
             Self::Validation(error) => (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
@@ -278,3 +341,64 @@ impl std::fmt::Display for ValidationError {
 }
 
 impl std::error::Error for ValidationError {}
+
+fn build_scan_response(scan: Scan, findings: Vec<Finding>) -> GetScanResponse {
+    let mut accessibility = Vec::new();
+    let mut inappropriate = Vec::new();
+
+    for finding in findings {
+        let response = FindingResponse {
+            id: finding.id,
+            title: finding.title,
+            category: finding.category.as_str().to_owned(),
+            severity: finding.severity.as_str().to_owned(),
+            summary: finding.summary,
+            location: finding.location,
+            suggestion: finding.suggestion,
+            example_excerpt: finding.example_excerpt,
+            why_unsafe: finding.why_unsafe,
+        };
+
+        match finding.kind {
+            FindingKind::Accessibility => accessibility.push(response),
+            FindingKind::ContentSafety => inappropriate.push(response),
+        }
+    }
+
+    let category_breakdown = if scan.status == ScanStatus::Completed {
+        let mut categories = accessibility
+            .iter()
+            .map(|_| Category::Accessibility)
+            .collect::<Vec<_>>();
+        categories.extend(
+            inappropriate
+                .iter()
+                .filter_map(|finding| Category::from_str(&finding.category).ok()),
+        );
+
+        Some(
+            category_breakdown(categories)
+                .into_iter()
+                .map(|(category, count)| CategoryBreakdownItem {
+                    category: category.as_str().to_owned(),
+                    count,
+                })
+                .collect(),
+        )
+    } else {
+        None
+    };
+
+    GetScanResponse {
+        id: scan.id,
+        status: scan.status.as_str().to_owned(),
+        phase: scan.phase.as_str().to_owned(),
+        accessibility_score: scan.accessibility_score,
+        inappropriate_score: scan.inappropriate_score,
+        risk_level: scan.risk_level.map(|level| level.as_str().to_owned()),
+        error_reason: scan.error_reason,
+        accessibility,
+        inappropriate,
+        category_breakdown,
+    }
+}
