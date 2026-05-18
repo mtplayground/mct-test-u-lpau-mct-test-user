@@ -6,11 +6,12 @@ use zeroclaw_ai::{
     AnthropicClientError, AnthropicClientErrorKind,
 };
 use zeroclaw_browser::{
-    accessibility_score, map_accessibility_findings, AxeViolation, BrowserSession,
-    BrowserSessionConfig, BrowserSessionError, BrowserSessionErrorReason,
+    map_accessibility_findings, AxeViolation, BrowserSession, BrowserSessionConfig,
+    BrowserSessionError, BrowserSessionErrorReason,
 };
 use zeroclaw_core::{
-    validate_scan_url, NewFinding, Scan, ScanPhase, ScanStatus, ScanStatusUpdate, UrlValidationError,
+    aggregate_findings, validate_scan_url, NewFinding, RiskLevel, Scan, ScanPhase, ScanScoreUpdate,
+    ScanStatus, ScanStatusUpdate, UrlValidationError,
 };
 use zeroclaw_storage::{Repository, RepositoryError};
 
@@ -31,6 +32,10 @@ pub struct ScanRunOutput {
     pub accessibility_findings: Vec<NewFinding>,
     pub accessibility_score: i32,
     pub content_safety_findings: Vec<NewFinding>,
+    pub inappropriate_score: i32,
+    pub risk_level: RiskLevel,
+    pub category_breakdown: std::collections::BTreeMap<zeroclaw_core::Category, usize>,
+    pub recommendations_text: String,
     pub content_safety_summary: String,
 }
 
@@ -97,7 +102,6 @@ where
 
         self.update_phase(scan_id, ScanPhase::Accessibility).await?;
         let accessibility_findings = map_accessibility_findings(&page_analysis.accessibility_violations);
-        let accessibility_score = accessibility_score(&page_analysis.accessibility_violations);
 
         if page_analysis.visible_text.trim().is_empty() {
             let failure = ScanFailureReason::NoContent;
@@ -132,8 +136,29 @@ where
         };
 
         let content_safety_findings = map_content_safety_findings(&parsed.findings);
+        let aggregated = aggregate_findings(&accessibility_findings, &content_safety_findings);
 
         self.update_phase(scan_id, ScanPhase::Aggregating).await?;
+        self.store
+            .insert_findings_batch(scan_id, &accessibility_findings)
+            .await
+            .map_err(ScanWorkerError::store)?;
+        self.store
+            .insert_findings_batch(scan_id, &content_safety_findings)
+            .await
+            .map_err(ScanWorkerError::store)?;
+        self.store
+            .update_scan_scores(
+                scan_id,
+                &ScanScoreUpdate {
+                    accessibility_score: Some(aggregated.accessibility_score),
+                    inappropriate_score: Some(aggregated.inappropriate_score),
+                    risk_level: Some(aggregated.risk_level),
+                },
+            )
+            .await
+            .map_err(ScanWorkerError::store)?
+            .ok_or(ScanWorkerError::scan_not_found(scan_id))?;
         self.store
             .update_scan_status(
                 scan_id,
@@ -149,8 +174,12 @@ where
 
         Ok(ScanRunOutput {
             accessibility_findings,
-            accessibility_score,
+            accessibility_score: aggregated.accessibility_score,
             content_safety_findings,
+            inappropriate_score: aggregated.inappropriate_score,
+            risk_level: aggregated.risk_level,
+            category_breakdown: aggregated.category_breakdown,
+            recommendations_text: aggregated.recommendations_text,
             content_safety_summary: parsed.summary,
         })
     }
@@ -197,6 +226,16 @@ where
 #[async_trait]
 pub trait ScanStore: Send + Sync {
     async fn find_scan_by_id(&self, scan_id: i64) -> Result<Option<Scan>, RepositoryError>;
+    async fn insert_findings_batch(
+        &self,
+        scan_id: i64,
+        findings: &[NewFinding],
+    ) -> Result<Vec<zeroclaw_core::Finding>, RepositoryError>;
+    async fn update_scan_scores(
+        &self,
+        scan_id: i64,
+        update: &ScanScoreUpdate,
+    ) -> Result<Option<Scan>, RepositoryError>;
 
     async fn update_scan_status(
         &self,
@@ -209,6 +248,22 @@ pub trait ScanStore: Send + Sync {
 impl ScanStore for Repository {
     async fn find_scan_by_id(&self, scan_id: i64) -> Result<Option<Scan>, RepositoryError> {
         Repository::find_scan_by_id(self, scan_id).await
+    }
+
+    async fn insert_findings_batch(
+        &self,
+        scan_id: i64,
+        findings: &[NewFinding],
+    ) -> Result<Vec<zeroclaw_core::Finding>, RepositoryError> {
+        Repository::insert_findings_batch(self, scan_id, findings).await
+    }
+
+    async fn update_scan_scores(
+        &self,
+        scan_id: i64,
+        update: &ScanScoreUpdate,
+    ) -> Result<Option<Scan>, RepositoryError> {
+        Repository::update_scan_scores(self, scan_id, update).await
     }
 
     async fn update_scan_status(
@@ -383,7 +438,7 @@ mod tests {
 
     use zeroclaw_ai::AnthropicClientError;
     use zeroclaw_browser::{AxeImpact, AxeNode, AxeViolation};
-    use zeroclaw_core::Severity;
+    use zeroclaw_core::{Finding, Severity};
 
     use super::*;
 
@@ -407,7 +462,18 @@ mod tests {
         assert_eq!(output.accessibility_score, 1);
         assert_eq!(output.accessibility_findings.len(), 1);
         assert!(output.content_safety_findings.is_empty());
+        assert_eq!(output.inappropriate_score, 0);
+        assert_eq!(output.risk_level, RiskLevel::Low);
+        assert_eq!(output.category_breakdown[&zeroclaw_core::Category::Accessibility], 1);
+        assert!(output
+            .recommendations_text
+            .contains("Resolve accessibility violations first"));
         assert_eq!(output.content_safety_summary, "Safe enough");
+        assert_eq!(store.inserted_findings_len(), 1);
+        assert_eq!(
+            store.score_updates(),
+            vec![(Some(1), Some(0), Some(RiskLevel::Low))]
+        );
 
         let updates = store.status_updates();
         assert_eq!(
@@ -571,6 +637,8 @@ mod tests {
     struct FakeStore {
         scan: Mutex<Option<Scan>>,
         updates: Mutex<Vec<(ScanStatus, ScanPhase, Option<String>)>>,
+        inserted_findings: Mutex<Vec<NewFinding>>,
+        score_updates: Mutex<Vec<(Option<i32>, Option<i32>, Option<RiskLevel>)>>,
     }
 
     impl FakeStore {
@@ -578,11 +646,27 @@ mod tests {
             Self {
                 scan: Mutex::new(Some(scan)),
                 updates: Mutex::new(Vec::new()),
+                inserted_findings: Mutex::new(Vec::new()),
+                score_updates: Mutex::new(Vec::new()),
             }
         }
 
         fn status_updates(&self) -> Vec<(ScanStatus, ScanPhase, Option<String>)> {
             self.updates.lock().expect("updates lock poisoned").clone()
+        }
+
+        fn inserted_findings_len(&self) -> usize {
+            self.inserted_findings
+                .lock()
+                .expect("findings lock poisoned")
+                .len()
+        }
+
+        fn score_updates(&self) -> Vec<(Option<i32>, Option<i32>, Option<RiskLevel>)> {
+            self.score_updates
+                .lock()
+                .expect("score updates lock poisoned")
+                .clone()
         }
     }
 
@@ -590,6 +674,59 @@ mod tests {
     impl ScanStore for FakeStore {
         async fn find_scan_by_id(&self, _scan_id: i64) -> Result<Option<Scan>, RepositoryError> {
             Ok(self.scan.lock().expect("scan lock poisoned").clone())
+        }
+
+        async fn insert_findings_batch(
+            &self,
+            _scan_id: i64,
+            findings: &[NewFinding],
+        ) -> Result<Vec<Finding>, RepositoryError> {
+            self.inserted_findings
+                .lock()
+                .expect("findings lock poisoned")
+                .extend(findings.iter().cloned());
+
+            Ok(findings
+                .iter()
+                .enumerate()
+                .map(|(index, finding)| Finding {
+                    id: index as i64 + 1,
+                    scan_id: 7,
+                    kind: finding.kind,
+                    title: finding.title.clone(),
+                    category: finding.category,
+                    severity: finding.severity,
+                    summary: finding.summary.clone(),
+                    location: finding.location.clone(),
+                    suggestion: finding.suggestion.clone(),
+                    example_excerpt: finding.example_excerpt.clone(),
+                    why_unsafe: finding.why_unsafe.clone(),
+                })
+                .collect())
+        }
+
+        async fn update_scan_scores(
+            &self,
+            _scan_id: i64,
+            update: &ScanScoreUpdate,
+        ) -> Result<Option<Scan>, RepositoryError> {
+            self.score_updates
+                .lock()
+                .expect("score updates lock poisoned")
+                .push((
+                    update.accessibility_score,
+                    update.inappropriate_score,
+                    update.risk_level,
+                ));
+
+            let mut guard = self.scan.lock().expect("scan lock poisoned");
+            if let Some(scan) = guard.as_mut() {
+                scan.accessibility_score = update.accessibility_score;
+                scan.inappropriate_score = update.inappropriate_score;
+                scan.risk_level = update.risk_level;
+            }
+
+            Ok(guard.clone())
         }
 
         async fn update_scan_status(
