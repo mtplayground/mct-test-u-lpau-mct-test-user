@@ -4,9 +4,7 @@ use sqlx::{
     Error as SqlxError,
 };
 
-use crate::config::Config;
-
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -14,16 +12,13 @@ pub struct Database {
 }
 
 impl Database {
-    pub async fn connect(config: &Config) -> Result<Self, DatabaseError> {
+    pub async fn connect(database_url: &str) -> Result<Self, DatabaseError> {
         let pool = PgPoolOptions::new()
-            .connect(&config.database_url)
+            .connect(database_url)
             .await
             .map_err(DatabaseError::Connect)?;
 
-        MIGRATOR
-            .run(&pool)
-            .await
-            .map_err(DatabaseError::Migrate)?;
+        migrate(&pool).await?;
 
         Ok(Self { pool })
     }
@@ -31,6 +26,10 @@ impl Database {
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }
+}
+
+pub async fn migrate(pool: &PgPool) -> Result<(), DatabaseError> {
+    MIGRATOR.run(pool).await.map_err(DatabaseError::Migrate)
 }
 
 #[derive(Debug)]
