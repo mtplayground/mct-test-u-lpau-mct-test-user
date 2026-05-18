@@ -7,6 +7,8 @@ import {
   DatabaseZap,
   EyeOff,
   Link2,
+  ListChecks,
+  ShieldAlert,
   Radar,
   SearchCheck,
   ShieldCheck,
@@ -20,6 +22,8 @@ import {
   type ScanErrorReason,
   type ScanPhase,
   type ScanResponse,
+  type FindingDto,
+  type FindingSeverity,
 } from "@/lib/api/types"
 
 const URL_PLACEHOLDER =
@@ -403,6 +407,52 @@ function CompletedScanState({
           max={16}
         />
       </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <FindingsSection
+          title="Accessibility Findings"
+          description="Detected accessibility issues with suggested fixes for the scanned page."
+          icon={<ListChecks className="size-5" />}
+          findings={scan.accessibility}
+          emptyMessage="No accessibility findings were returned for this scan."
+          renderDetails={(finding) => (
+            <div className="mt-4 grid gap-3">
+              <FindingDetail
+                label="Suggested fix"
+                value={
+                  finding.suggestion ??
+                  "Review the affected element and apply the recommended accessibility improvement."
+                }
+              />
+            </div>
+          )}
+        />
+        <FindingsSection
+          title="Inappropriate Content Findings"
+          description="Unsafe or sensitive content findings with their category, excerpt, and recommended action."
+          icon={<ShieldAlert className="size-5" />}
+          findings={scan.inappropriate}
+          emptyMessage="No inappropriate content findings were returned for this scan."
+          renderDetails={(finding) => (
+            <div className="mt-4 grid gap-3">
+              <FindingDetail
+                label="Category"
+                value={formatEnumLabel(finding.category)}
+              />
+              <FindingDetail
+                label="Excerpt"
+                value={finding.example_excerpt ?? "No excerpt was provided for this finding."}
+              />
+              <FindingDetail
+                label="Suggested action"
+                value={
+                  finding.suggestion ??
+                  "Review the flagged content and apply the recommended moderation action."
+                }
+              />
+            </div>
+          )}
+        />
+      </div>
     </div>
   )
 }
@@ -525,6 +575,103 @@ function ScoreCard({
         </div>
       </div>
     </article>
+  )
+}
+
+type FindingsSectionProps = {
+  title: string
+  description: string
+  icon: ReactNode
+  findings: FindingDto[]
+  emptyMessage: string
+  renderDetails: (finding: FindingDto) => ReactNode
+}
+
+function FindingsSection({
+  title,
+  description,
+  icon,
+  findings,
+  emptyMessage,
+  renderDetails,
+}: FindingsSectionProps) {
+  return (
+    <section className="rounded-[28px] border border-white/12 bg-white/7 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-200/62">
+            {title}
+          </p>
+          <p className="mt-3 max-w-xl text-sm leading-6 text-emerald-50/74">
+            {description}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-black/18 p-3 text-emerald-100">
+          {icon}
+        </div>
+      </div>
+
+      {findings.length === 0 ? (
+        <div className="mt-6 rounded-[24px] border border-dashed border-white/12 bg-black/16 p-5 text-sm leading-6 text-emerald-50/68">
+          {emptyMessage}
+        </div>
+      ) : (
+        <div className="mt-6 space-y-4">
+          {findings.map((finding) => (
+            <article
+              key={finding.id}
+              className="rounded-[24px] border border-white/10 bg-black/18 p-5"
+            >
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <h3 className="text-lg font-semibold tracking-[-0.04em] text-white">
+                    {finding.title}
+                  </h3>
+                  <p className="mt-3 text-sm leading-6 text-emerald-50/74">
+                    {finding.summary}
+                  </p>
+                </div>
+                <SeverityBadge severity={finding.severity} />
+              </div>
+
+              {renderDetails(finding)}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+type FindingDetailProps = {
+  label: string
+  value: string
+}
+
+function FindingDetail({ label, value }: FindingDetailProps) {
+  return (
+    <div className="rounded-[18px] border border-white/8 bg-white/6 p-4">
+      <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-emerald-100/52">
+        {label}
+      </p>
+      <p className="mt-2 text-sm leading-6 text-white/76">{value}</p>
+    </div>
+  )
+}
+
+type SeverityBadgeProps = {
+  severity: FindingSeverity
+}
+
+function SeverityBadge({ severity }: SeverityBadgeProps) {
+  const tone = severityToneFor(severity)
+
+  return (
+    <span
+      className={`inline-flex shrink-0 rounded-full border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.22em] ${tone}`}
+    >
+      {severity}
+    </span>
   )
 }
 
@@ -702,5 +849,18 @@ function riskToneFor(riskLevel: ScanResponse["risk_level"]) {
         panelClass: "border-white/10 bg-white/6",
         badgeClass: "border-white/10 bg-white/8 text-white/72",
       }
+  }
+}
+
+function severityToneFor(severity: FindingSeverity) {
+  switch (severity) {
+    case "critical":
+      return "border-fuchsia-200/18 bg-fuchsia-300/14 text-fuchsia-100"
+    case "high":
+      return "border-rose-200/18 bg-rose-300/14 text-rose-100"
+    case "medium":
+      return "border-amber-200/18 bg-amber-300/14 text-amber-100"
+    case "low":
+      return "border-emerald-200/18 bg-emerald-300/14 text-emerald-100"
   }
 }
