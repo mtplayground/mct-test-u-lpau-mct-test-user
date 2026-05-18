@@ -2074,6 +2074,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "zeroclaw-core"
+version = "0.1.0"
+
+[[package]]
 name = "zeroclaw-server"
 version = "0.1.0"
 dependencies = [
