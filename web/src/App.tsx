@@ -19,6 +19,7 @@ import { ApiClientError } from "@/lib/api/client"
 import { useCreateScan, useScan } from "@/lib/api/hooks"
 import {
   isTerminalScanStatus,
+  type CategoryBreakdownItem,
   type ScanErrorReason,
   type ScanPhase,
   type ScanResponse,
@@ -453,6 +454,10 @@ function CompletedScanState({
           )}
         />
       </div>
+      <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <CategoryBreakdownCard breakdown={scan.category_breakdown ?? []} />
+        <RecommendedActionsCard actions={scan.recommended_actions ?? []} />
+      </div>
     </div>
   )
 }
@@ -638,6 +643,92 @@ function FindingsSection({
             </article>
           ))}
         </div>
+      )}
+    </section>
+  )
+}
+
+type CategoryBreakdownCardProps = {
+  breakdown: CategoryBreakdownItem[]
+}
+
+function CategoryBreakdownCard({ breakdown }: CategoryBreakdownCardProps) {
+  return (
+    <section className="rounded-[28px] border border-white/12 bg-white/7 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-200/62">
+            Content Analysis Breakdown
+          </p>
+          <p className="mt-3 max-w-xl text-sm leading-6 text-emerald-50/74">
+            Category counts from the completed scan response, including zero-count rows returned by the server.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-black/18 p-3 text-emerald-100">
+          <BadgeAlert className="size-5" />
+        </div>
+      </div>
+
+      <div className="mt-6 overflow-hidden rounded-[24px] border border-white/10 bg-black/18">
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-white/10 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.24em] text-emerald-100/52">
+          <span>Category</span>
+          <span>Count</span>
+        </div>
+        <div className="divide-y divide-white/8">
+          {breakdown.map((item) => (
+            <div
+              key={item.category}
+              className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3 text-sm text-white/78"
+            >
+              <span>{formatEnumLabel(item.category)}</span>
+              <span className="font-mono text-emerald-100/82">{item.count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+type RecommendedActionsCardProps = {
+  actions: string[]
+}
+
+function RecommendedActionsCard({ actions }: RecommendedActionsCardProps) {
+  return (
+    <section className="rounded-[28px] border border-white/12 bg-white/7 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-200/62">
+            Recommended Actions
+          </p>
+          <p className="mt-3 max-w-xl text-sm leading-6 text-emerald-50/74">
+            Remediation lines supplied by the server for the current mix of findings.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-black/18 p-3 text-emerald-100">
+          <ShieldCheck className="size-5" />
+        </div>
+      </div>
+
+      {actions.length === 0 ? (
+        <div className="mt-6 rounded-[24px] border border-dashed border-white/12 bg-black/16 p-5 text-sm leading-6 text-emerald-50/68">
+          No recommended actions were returned for this scan.
+        </div>
+      ) : (
+        <ol className="mt-6 space-y-3">
+          {actions.map((action, index) => (
+            <li
+              key={`${index}-${action}`}
+              className="flex gap-3 rounded-[22px] border border-white/10 bg-black/18 p-4"
+            >
+              <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-emerald-200/14 bg-emerald-300/12 font-mono text-[11px] text-emerald-100">
+                {index + 1}
+              </span>
+              <p className="text-sm leading-6 text-white/78">{action}</p>
+            </li>
+          ))}
+        </ol>
       )}
     </section>
   )

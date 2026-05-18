@@ -20,7 +20,7 @@ use tracing::{info, Level};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use zeroclaw_ai::{AnthropicClient, AnthropicClientConfig};
 use zeroclaw_core::{
-    category_breakdown, validate_scan_url, Category, Finding, FindingKind, NewScan, Scan,
+    category_breakdown, recommendations_text, validate_scan_url, Category, Finding, FindingKind, NewScan, Scan,
     ScanPhase, ScanStatus, UrlValidationError,
 };
 use zeroclaw_storage::{Database, DatabaseError, Repository, RepositoryError};
@@ -270,6 +270,7 @@ struct GetScanResponse {
     accessibility: Vec<FindingResponse>,
     inappropriate: Vec<FindingResponse>,
     category_breakdown: Option<Vec<CategoryBreakdownItem>>,
+    recommended_actions: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -449,6 +450,24 @@ fn build_scan_response(scan: Scan, findings: Vec<Finding>) -> GetScanResponse {
         None
     };
 
+    let recommended_actions = category_breakdown
+        .as_ref()
+        .map(|breakdown: &Vec<CategoryBreakdownItem>| {
+        let recommendations = recommendations_text(
+            &breakdown
+                .iter()
+                .filter_map(|item| Category::from_str(&item.category).ok().map(|category| (category, item.count)))
+                .collect(),
+        );
+
+        recommendations
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>()
+        });
+
     GetScanResponse {
         id: scan.id,
         url: scan.url,
@@ -462,6 +481,7 @@ fn build_scan_response(scan: Scan, findings: Vec<Finding>) -> GetScanResponse {
         accessibility,
         inappropriate,
         category_breakdown,
+        recommended_actions,
     }
 }
 

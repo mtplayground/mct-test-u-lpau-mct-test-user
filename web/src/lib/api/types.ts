@@ -77,6 +77,7 @@ export type ScanResponse = {
   accessibility: FindingDto[]
   inappropriate: FindingDto[]
   category_breakdown: CategoryBreakdownItem[] | null
+  recommended_actions: string[] | null
 }
 
 export type ErrorResponse = {
