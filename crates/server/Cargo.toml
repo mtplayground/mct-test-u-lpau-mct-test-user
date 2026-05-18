@@ -14,3 +14,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 zeroclaw-core = { path = "../core" }
 zeroclaw-storage = { path = "../storage" }
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serial_test = "3"
+serde_json = "1"
+sqlx.workspace = true
