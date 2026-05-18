@@ -3,9 +3,18 @@ mod db;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use axum::{extract::Request, http::StatusCode, response::IntoResponse, routing::get, Router};
+use axum::{
+    extract::Request,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::get,
+    Router,
+};
 use tokio::{net::TcpListener, signal};
-use tower_http::trace::TraceLayer;
+use tower_http::{
+    services::{ServeDir, ServeFile},
+    trace::TraceLayer,
+};
 use tracing::{info, Level};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -40,7 +49,8 @@ async fn main() -> Result<(), AppError> {
 
 fn build_router() -> Router {
     Router::new()
-        .route("/healthz", get(healthz))
+        .nest("/api", api_router())
+        .fallback_service(spa_service())
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<_>| {
                 tracing::span!(
@@ -53,8 +63,22 @@ fn build_router() -> Router {
         )
 }
 
+fn api_router() -> Router {
+    Router::new()
+        .route("/healthz", get(healthz))
+        .fallback(api_not_found)
+}
+
+fn spa_service() -> ServeDir<ServeFile> {
+    ServeDir::new("web/dist").fallback(ServeFile::new("web/dist/index.html"))
+}
+
 async fn healthz() -> impl IntoResponse {
     StatusCode::OK
+}
+
+async fn api_not_found() -> impl IntoResponse {
+    StatusCode::NOT_FOUND
 }
 
 fn init_tracing() -> Result<(), AppError> {
