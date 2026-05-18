@@ -36,6 +36,7 @@ async fn main() -> Result<(), AppError> {
         .map_err(AppError::Database)?;
     let app = build_router(AppState {
         repository: Arc::new(Repository::new(database.pool().clone())),
+        worker_dispatcher: Arc::new(LoggingWorker),
     });
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port);
     let listener = TcpListener::bind(addr).await.map_err(AppError::Bind)?;
@@ -129,7 +130,9 @@ async fn create_scan(
         .await
         .map_err(ApiError::Repository)?;
 
-    spawn_worker_stub(scan.id);
+    state
+        .worker_dispatcher
+        .dispatch(scan.id, state.repository.clone());
 
     Ok(Json(CreateScanResponse {
         id: scan.id,
@@ -155,12 +158,6 @@ async fn get_scan(
         .map_err(ApiError::Repository)?;
 
     Ok(Json(build_scan_response(scan, findings)))
-}
-
-fn spawn_worker_stub(scan_id: i64) {
-    tokio::spawn(async move {
-        tracing::info!(scan_id, "worker stub spawned for scan");
-    });
 }
 
 fn init_tracing() -> Result<(), AppError> {
@@ -229,6 +226,7 @@ impl std::error::Error for AppError {}
 #[derive(Clone)]
 struct AppState {
     repository: Arc<Repository>,
+    worker_dispatcher: Arc<dyn WorkerDispatcher>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -237,13 +235,13 @@ struct CreateScanRequest {
     force: Option<bool>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct CreateScanResponse {
     id: i64,
     cached: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct GetScanResponse {
     id: i64,
     status: String,
@@ -257,7 +255,7 @@ struct GetScanResponse {
     category_breakdown: Option<Vec<CategoryBreakdownItem>>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct FindingResponse {
     id: i64,
     title: String,
@@ -270,13 +268,13 @@ struct FindingResponse {
     why_unsafe: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct CategoryBreakdownItem {
     category: String,
     count: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct ErrorResponse {
     error: String,
 }
@@ -342,6 +340,20 @@ impl std::fmt::Display for ValidationError {
 
 impl std::error::Error for ValidationError {}
 
+trait WorkerDispatcher: Send + Sync {
+    fn dispatch(&self, scan_id: i64, repository: Arc<Repository>);
+}
+
+struct LoggingWorker;
+
+impl WorkerDispatcher for LoggingWorker {
+    fn dispatch(&self, scan_id: i64, _repository: Arc<Repository>) {
+        tokio::spawn(async move {
+            tracing::info!(scan_id, "worker stub spawned for scan");
+        });
+    }
+}
+
 fn build_scan_response(scan: Scan, findings: Vec<Finding>) -> GetScanResponse {
     let mut accessibility = Vec::new();
     let mut inappropriate = Vec::new();
@@ -405,12 +417,106 @@ fn build_scan_response(scan: Scan, findings: Vec<Finding>) -> GetScanResponse {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        error::Error,
+        net::TcpListener,
+        path::{Path, PathBuf},
+        process::Command,
+        sync::Arc,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use axum::http::StatusCode;
+    use reqwest::Client;
+    use serial_test::serial;
+    use sqlx::{postgres::PgPoolOptions, Executor};
     use time::OffsetDateTime;
-    use zeroclaw_core::{RiskLevel, Severity};
+    use tokio::{net::TcpListener as TokioTcpListener, task::JoinHandle, time::sleep};
+    use zeroclaw_core::{
+        NewFinding, RiskLevel, ScanScoreUpdate, ScanStatusUpdate, Severity,
+    };
+    use zeroclaw_storage::{migrate, Repository};
 
     use super::{
-        build_scan_response, Category, Finding, FindingKind, Scan, ScanPhase, ScanStatus,
+        build_router, build_scan_response, AppState, Category, CreateScanResponse,
+        ErrorResponse, Finding, FindingKind, GetScanResponse, LoggingWorker, Scan, ScanPhase,
+        ScanStatus, WorkerDispatcher,
     };
+
+    const PG_BIN_DIR: &str = "/usr/lib/postgresql/16/bin";
+
+    #[tokio::test]
+    #[serial]
+    async fn post_then_poll_happy_path_returns_completed_scan_results() -> Result<(), Box<dyn Error>> {
+        let test_app = TestApp::spawn(Arc::new(CompletedWorkerStub)).await?;
+        let client = Client::new();
+
+        let create_response = client
+            .post(test_app.url("/api/scans"))
+            .json(&serde_json::json!({
+                "url": "https://example.com",
+            }))
+            .send()
+            .await?;
+
+        assert_eq!(create_response.status(), StatusCode::OK);
+        let created: CreateScanResponse = create_response.json().await?;
+        assert!(!created.cached);
+
+        let polled = test_app.poll_scan(&client, created.id).await?;
+
+        assert_eq!(polled.status, "completed");
+        assert_eq!(polled.phase, "completed");
+        assert_eq!(polled.accessibility_score, Some(1));
+        assert_eq!(polled.inappropriate_score, Some(8));
+        assert_eq!(polled.risk_level.as_deref(), Some("high"));
+        assert_eq!(polled.accessibility.len(), 1);
+        assert_eq!(polled.inappropriate.len(), 1);
+
+        let breakdown = polled
+            .category_breakdown
+            .ok_or("completed scan should include category breakdown")?;
+        assert!(breakdown.iter().any(|item| item.category == "accessibility" && item.count == 1));
+        assert!(breakdown.iter().any(|item| item.category == "weapons" && item.count == 1));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn post_scan_rejects_invalid_url() -> Result<(), Box<dyn Error>> {
+        let test_app = TestApp::spawn(Arc::new(LoggingWorker)).await?;
+        let client = Client::new();
+
+        let response = client
+            .post(test_app.url("/api/scans"))
+            .json(&serde_json::json!({
+                "url": "http://127.0.0.1/private",
+            }))
+            .send()
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let error: ErrorResponse = response.json().await?;
+        assert_eq!(error.error, "Please enter a valid public http:// or https:// URL.");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn get_scan_returns_not_found_for_unknown_id() -> Result<(), Box<dyn Error>> {
+        let test_app = TestApp::spawn(Arc::new(LoggingWorker)).await?;
+        let client = Client::new();
+
+        let response = client.get(test_app.url("/api/scans/999999")).send().await?;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let error: ErrorResponse = response.json().await?;
+        assert_eq!(error.error, "Scan not found.");
+
+        Ok(())
+    }
 
     #[test]
     fn build_scan_response_splits_findings_and_includes_breakdown_for_completed_scan() {
@@ -489,6 +595,281 @@ mod tests {
             suggestion: None,
             example_excerpt: None,
             why_unsafe: None,
+        }
+    }
+
+    struct TestApp {
+        _admin_pool: sqlx::PgPool,
+        _pool: sqlx::PgPool,
+        server: JoinHandle<()>,
+        _cluster: TestCluster,
+        base_url: String,
+    }
+
+    impl TestApp {
+        async fn spawn(worker_dispatcher: Arc<dyn WorkerDispatcher>) -> Result<Self, Box<dyn Error>> {
+            let cluster = TestCluster::start()?;
+            let database_name = format!("api_test_{}", unique_suffix());
+            let admin_pool = PgPoolOptions::new()
+                .max_connections(1)
+                .connect(&cluster.postgres_url("postgres"))
+                .await?;
+
+            admin_pool
+                .execute(format!("CREATE DATABASE {database_name}").as_str())
+                .await?;
+
+            let database_url = cluster.postgres_url(&database_name);
+            let pool = PgPoolOptions::new()
+                .max_connections(5)
+                .connect(&database_url)
+                .await?;
+            migrate(&pool).await?;
+
+            let app = build_router(AppState {
+                repository: Arc::new(Repository::new(pool.clone())),
+                worker_dispatcher,
+            });
+
+            let listener = TokioTcpListener::bind("127.0.0.1:0").await?;
+            let address = listener.local_addr()?;
+            let server = tokio::spawn(async move {
+                let _ = axum::serve(listener, app).await;
+            });
+
+            Ok(Self {
+                _admin_pool: admin_pool,
+                _pool: pool,
+                server,
+                _cluster: cluster,
+                base_url: format!("http://{address}"),
+            })
+        }
+
+        fn url(&self, path: &str) -> String {
+            format!("{}{}", self.base_url, path)
+        }
+
+        async fn poll_scan(
+            &self,
+            client: &Client,
+            scan_id: i64,
+        ) -> Result<GetScanResponse, Box<dyn Error>> {
+            for _ in 0..20 {
+                let response = client.get(self.url(&format!("/api/scans/{scan_id}"))).send().await?;
+                let body: GetScanResponse = response.json().await?;
+                if body.status == "completed" {
+                    return Ok(body);
+                }
+
+                sleep(std::time::Duration::from_millis(50)).await;
+            }
+
+            Err("scan did not complete in time".into())
+        }
+    }
+
+    impl Drop for TestApp {
+        fn drop(&mut self) {
+            self.server.abort();
+        }
+    }
+
+    struct CompletedWorkerStub;
+
+    impl WorkerDispatcher for CompletedWorkerStub {
+        fn dispatch(&self, scan_id: i64, repository: Arc<Repository>) {
+            tokio::spawn(async move {
+                let _ = repository
+                    .update_scan_status(
+                        scan_id,
+                        &ScanStatusUpdate {
+                            status: ScanStatus::Running,
+                            phase: ScanPhase::Accessibility,
+                            error_reason: None,
+                        },
+                    )
+                    .await;
+
+                let _ = repository
+                    .insert_findings_batch(
+                        scan_id,
+                        &[
+                            NewFinding {
+                                kind: FindingKind::Accessibility,
+                                title: "Missing alt text".to_owned(),
+                                category: Category::Accessibility,
+                                severity: Severity::Low,
+                                summary: "Decorative image missing alt".to_owned(),
+                                location: Some("img.hero".to_owned()),
+                                suggestion: Some("Add alt text".to_owned()),
+                                example_excerpt: None,
+                                why_unsafe: None,
+                            },
+                            NewFinding {
+                                kind: FindingKind::ContentSafety,
+                                title: "Weapon promotion".to_owned(),
+                                category: Category::Weapons,
+                                severity: Severity::High,
+                                summary: "Page markets weapons".to_owned(),
+                                location: None,
+                                suggestion: Some("Remove the promotion".to_owned()),
+                                example_excerpt: Some("Buy tactical rifles today".to_owned()),
+                                why_unsafe: Some("Promotes weapon acquisition.".to_owned()),
+                            },
+                        ],
+                    )
+                    .await;
+
+                let _ = repository
+                    .update_scan_scores(
+                        scan_id,
+                        &ScanScoreUpdate {
+                            accessibility_score: Some(1),
+                            inappropriate_score: Some(8),
+                            risk_level: Some(RiskLevel::High),
+                        },
+                    )
+                    .await;
+
+                let _ = repository
+                    .update_scan_status(
+                        scan_id,
+                        &ScanStatusUpdate {
+                            status: ScanStatus::Completed,
+                            phase: ScanPhase::Completed,
+                            error_reason: None,
+                        },
+                    )
+                    .await;
+            });
+        }
+    }
+
+    struct TestCluster {
+        data_dir: PathBuf,
+        log_file: PathBuf,
+        port: u16,
+        socket_dir: PathBuf,
+    }
+
+    impl TestCluster {
+        fn start() -> Result<Self, Box<dyn Error>> {
+            let data_dir = create_temp_dir("zeroclaw-api-pgdata")?;
+            let socket_dir = create_temp_dir("zeroclaw-api-pgsock")?;
+            let log_file = create_temp_file("zeroclaw-api-pglog")?;
+            let port = pick_unused_port()?;
+
+            run_as_postgres(&[
+                "initdb",
+                "-A",
+                "trust",
+                "-U",
+                "postgres",
+                "-D",
+                path_arg(&data_dir)?,
+            ])?;
+
+            run_as_postgres(&[
+                "pg_ctl",
+                "-D",
+                path_arg(&data_dir)?,
+                "-l",
+                path_arg(&log_file)?,
+                "-o",
+                &format!("-h 127.0.0.1 -k {} -p {port}", socket_dir.display()),
+                "start",
+            ])?;
+
+            Ok(Self {
+                data_dir,
+                log_file,
+                port,
+                socket_dir,
+            })
+        }
+
+        fn postgres_url(&self, database_name: &str) -> String {
+            format!("postgresql://postgres@127.0.0.1:{}/{}", self.port, database_name)
+        }
+    }
+
+    impl Drop for TestCluster {
+        fn drop(&mut self) {
+            let _ = run_as_postgres(&[
+                "pg_ctl",
+                "-D",
+                self.data_dir.to_string_lossy().as_ref(),
+                "stop",
+                "-m",
+                "fast",
+            ]);
+
+            let _ = std::fs::remove_dir_all(&self.data_dir);
+            let _ = std::fs::remove_dir_all(&self.socket_dir);
+            let _ = std::fs::remove_file(&self.log_file);
+        }
+    }
+
+    fn run_as_postgres(args: &[&str]) -> Result<(), Box<dyn Error>> {
+        let binary = format!("{PG_BIN_DIR}/{}", args[0]);
+        let status = Command::new("runuser")
+            .args(["-u", "postgres", "--", &binary])
+            .args(&args[1..])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()?;
+
+        if !status.success() {
+            return Err(format!("command failed: runuser -u postgres -- {binary}").into());
+        }
+
+        Ok(())
+    }
+
+    fn create_temp_dir(prefix: &str) -> Result<PathBuf, Box<dyn Error>> {
+        let dir = std::env::temp_dir().join(format!("{prefix}-{}", unique_suffix()));
+        std::fs::create_dir_all(&dir)?;
+        chown_to_postgres(&dir)?;
+        Ok(dir)
+    }
+
+    fn create_temp_file(prefix: &str) -> Result<PathBuf, Box<dyn Error>> {
+        let path = std::env::temp_dir().join(format!("{prefix}-{}", unique_suffix()));
+        std::fs::File::create(&path)?;
+        chown_to_postgres(&path)?;
+        Ok(path)
+    }
+
+    fn chown_to_postgres(path: &Path) -> Result<(), Box<dyn Error>> {
+        let status = Command::new("chown")
+            .arg("postgres:postgres")
+            .arg(path)
+            .status()?;
+
+        if !status.success() {
+            return Err(format!("failed to chown {}", path.display()).into());
+        }
+
+        Ok(())
+    }
+
+    fn pick_unused_port() -> Result<u16, Box<dyn Error>> {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
+        drop(listener);
+        Ok(port)
+    }
+
+    fn path_arg(path: &Path) -> Result<&str, Box<dyn Error>> {
+        path.to_str()
+            .ok_or_else(|| format!("non-utf8 path: {}", path.display()).into())
+    }
+
+    fn unique_suffix() -> u128 {
+        match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => 0,
         }
     }
 }
