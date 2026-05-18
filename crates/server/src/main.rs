@@ -1,5 +1,4 @@
 mod config;
-mod db;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -17,16 +16,18 @@ use tower_http::{
 };
 use tracing::{info, Level};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use zeroclaw_storage::{Database, DatabaseError};
 
 use crate::config::{Config, ConfigError};
-use crate::db::{Database, DatabaseError};
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     init_tracing()?;
 
     let config = Config::from_env().map_err(AppError::Config)?;
-    let database = Database::connect(&config).await.map_err(AppError::Database)?;
+    let database = Database::connect(&config.database_url)
+        .await
+        .map_err(AppError::Database)?;
     let app = build_router();
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port);
     let listener = TcpListener::bind(addr).await.map_err(AppError::Bind)?;
