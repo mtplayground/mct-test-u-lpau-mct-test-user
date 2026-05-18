@@ -1,0 +1,100 @@
+{
+  "violations": [
+    {
+      "id": "image-alt",
+      "impact": "minor",
+      "description": "Ensures <img> elements have alternate text or a role of none or presentation",
+      "help": "Images must have alternative text",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/image-alt?application=axeAPI",
+      "tags": ["cat.text-alternatives", "wcag2a"],
+      "nodes": [
+        {
+          "html": "<img class=\"hero\" src=\"/hero.png\">",
+          "target": ["img.hero"],
+          "failureSummary": "Fix any of the following:\n  Element does not have an alt attribute",
+          "any": [
+            {
+              "id": "has-alt",
+              "impact": "minor",
+              "message": "Element does not have an alt attribute"
+            }
+          ],
+          "all": [],
+          "none": []
+        }
+      ]
+    },
+    {
+      "id": "label",
+      "impact": "moderate",
+      "description": "Ensures every form element has a label",
+      "help": "Form elements must have labels",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/label?application=axeAPI",
+      "tags": ["cat.forms", "wcag2a"],
+      "nodes": [
+        {
+          "html": "<input id=\"email\">",
+          "target": ["#email"],
+          "failureSummary": "Fix any of the following:\n  Form element does not have an implicit (wrapped) <label>",
+          "any": [
+            {
+              "id": "implicit-label",
+              "impact": "moderate",
+              "message": "Form element does not have an implicit (wrapped) <label>"
+            }
+          ],
+          "all": [],
+          "none": []
+        }
+      ]
+    },
+    {
+      "id": "button-name",
+      "impact": "serious",
+      "description": "Ensures buttons have discernible text",
+      "help": "Buttons must have discernible text",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/button-name?application=axeAPI",
+      "tags": ["cat.name-role-value", "wcag2a"],
+      "nodes": [
+        {
+          "html": "<button></button>",
+          "target": ["button.cta"],
+          "failureSummary": "Fix any of the following:\n  Element does not have inner text that is visible to screen readers",
+          "any": [
+            {
+              "id": "button-has-visible-text",
+              "impact": "serious",
+              "message": "Element does not have inner text that is visible to screen readers"
+            }
+          ],
+          "all": [],
+          "none": []
+        }
+      ]
+    },
+    {
+      "id": "color-contrast",
+      "impact": "critical",
+      "description": "Ensures the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+      "help": "Elements must meet minimum color contrast ratio thresholds",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/color-contrast?application=axeAPI",
+      "tags": ["cat.color", "wcag2aa"],
+      "nodes": [
+        {
+          "html": "<a class=\"muted-link\">Read more</a>",
+          "target": ["a.muted-link"],
+          "failureSummary": "Fix any of the following:\n  Ensures the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+          "any": [
+            {
+              "id": "color-contrast",
+              "impact": "critical",
+              "message": "Element has insufficient color contrast of 2.7 (foreground color: #999999, background color: #ffffff, font size: 14.0pt, font weight: normal). Expected contrast ratio of 4.5:1"
+            }
+          ],
+          "all": [],
+          "none": []
+        }
+      ]
+    }
+  ]
+}

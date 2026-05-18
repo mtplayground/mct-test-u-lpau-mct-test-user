@@ -2774,6 +2774,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "zeroclaw-core",
 ]
 
 [[package]]
