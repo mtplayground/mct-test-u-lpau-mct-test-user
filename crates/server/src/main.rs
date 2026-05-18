@@ -402,3 +402,93 @@ fn build_scan_response(scan: Scan, findings: Vec<Finding>) -> GetScanResponse {
         category_breakdown,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use time::OffsetDateTime;
+    use zeroclaw_core::{RiskLevel, Severity};
+
+    use super::{
+        build_scan_response, Category, Finding, FindingKind, Scan, ScanPhase, ScanStatus,
+    };
+
+    #[test]
+    fn build_scan_response_splits_findings_and_includes_breakdown_for_completed_scan() {
+        let response = build_scan_response(
+            sample_scan(ScanStatus::Completed, ScanPhase::Completed),
+            vec![
+                sample_finding(
+                    11,
+                    FindingKind::Accessibility,
+                    Category::Accessibility,
+                    "Missing alt text",
+                ),
+                sample_finding(
+                    12,
+                    FindingKind::ContentSafety,
+                    Category::Weapons,
+                    "Weapon promotion",
+                ),
+            ],
+        );
+
+        assert_eq!(response.status, "completed");
+        assert_eq!(response.accessibility.len(), 1);
+        assert_eq!(response.inappropriate.len(), 1);
+
+        let breakdown = response
+            .category_breakdown
+            .expect("completed scans should include category breakdown");
+
+        assert!(breakdown.iter().any(|item| item.category == "accessibility" && item.count == 1));
+        assert!(breakdown.iter().any(|item| item.category == "weapons" && item.count == 1));
+    }
+
+    #[test]
+    fn build_scan_response_omits_breakdown_for_non_completed_scan() {
+        let response = build_scan_response(
+            sample_scan(ScanStatus::Running, ScanPhase::Accessibility),
+            vec![sample_finding(
+                21,
+                FindingKind::Accessibility,
+                Category::Accessibility,
+                "Pending issue",
+            )],
+        );
+
+        assert_eq!(response.status, "running");
+        assert!(response.category_breakdown.is_none());
+    }
+
+    fn sample_scan(status: ScanStatus, phase: ScanPhase) -> Scan {
+        Scan {
+            id: 7,
+            url: "https://example.com".to_owned(),
+            normalized_url: "https://example.com/".to_owned(),
+            status,
+            phase,
+            accessibility_score: Some(2),
+            inappropriate_score: Some(4),
+            risk_level: Some(RiskLevel::Medium),
+            error_reason: None,
+            created_at: OffsetDateTime::UNIX_EPOCH,
+            updated_at: OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    fn sample_finding(id: i64, kind: FindingKind, category: Category, title: &str) -> Finding {
+        Finding {
+            id,
+            scan_id: 7,
+            kind,
+            title: title.to_owned(),
+            category,
+            severity: Severity::Medium,
+            summary: "summary".to_owned(),
+            location: None,
+            suggestion: None,
+            example_excerpt: None,
+            why_unsafe: None,
+        }
+    }
+}
