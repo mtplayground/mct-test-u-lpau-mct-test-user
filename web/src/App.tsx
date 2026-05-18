@@ -3,6 +3,7 @@ import type { ReactNode } from "react"
 import { ArrowRight, DatabaseZap, SearchCheck, ShieldCheck } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { scanQueryKeys } from "@/lib/api/hooks"
 
 function App() {
   return (
@@ -93,11 +94,11 @@ function App() {
             <div className="grid gap-4 sm:grid-cols-2">
               <InfoPanel
                 title="What landed"
-                body="Vite TypeScript app, Tailwind v4, shadcn/ui init, lucide-react, and a mounted Query client provider."
+                body="Vite TypeScript app, Tailwind v4, shadcn/ui init, lucide-react, TanStack Query, and a typed API client layer for scans."
               />
               <InfoPanel
-                title="What stays out"
-                body="No scan flow, API calls, or result views yet. This issue only establishes the frontend shell."
+                title="API contract"
+                body={`Query keys live under ${scanQueryKeys.all[0]}, with typed POST /api/scans and GET /api/scans/:id hooks ready for the next UI issues.`}
               />
             </div>
           </div>
