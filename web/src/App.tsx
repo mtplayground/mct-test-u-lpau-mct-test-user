@@ -2,8 +2,10 @@ import { useState, type FormEvent, type ReactNode } from "react"
 
 import {
   ArrowRight,
+  BadgeAlert,
   CircleAlert,
   DatabaseZap,
+  EyeOff,
   Link2,
   Radar,
   SearchCheck,
@@ -17,7 +19,7 @@ import {
   isTerminalScanStatus,
   type ScanErrorReason,
   type ScanPhase,
-  type ScanStatus,
+  type ScanResponse,
 } from "@/lib/api/types"
 
 const URL_PLACEHOLDER =
@@ -148,10 +150,7 @@ function App() {
               />
             ) : (
               <TerminalScanState
-                id={activeScan.data.id}
-                status={activeScan.data.status}
-                phase={activeScan.data.phase}
-                errorReason={activeScan.data.error_reason}
+                scan={activeScan.data}
                 isRefreshing={activeScan.isFetching}
                 onTryAgain={() => {
                   setActiveScanId(null)
@@ -242,62 +241,27 @@ function EmptyState() {
 }
 
 type TerminalScanStateProps = {
-  id: number
-  status: ScanStatus
-  phase: ScanPhase
-  errorReason: ScanErrorReason | null
+  scan: ScanResponse
   isRefreshing: boolean
   onTryAgain: () => void
 }
 
 function TerminalScanState({
-  id,
-  status,
-  phase,
-  errorReason,
+  scan,
   isRefreshing,
   onTryAgain,
 }: TerminalScanStateProps) {
-  if (status === "failed") {
+  if (scan.status === "failed") {
     return (
       <ErrorScanState
-        errorReason={errorReason}
+        errorReason={scan.error_reason}
         isRefreshing={isRefreshing}
         onTryAgain={onTryAgain}
       />
     )
   }
 
-  return (
-    <article className="rounded-[32px] border border-white/12 bg-white/7 p-8 shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-sm sm:p-10">
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="font-mono text-xs uppercase tracking-[0.32em] text-emerald-200/62">
-            Active scan
-          </p>
-          <h2 className="mt-4 text-3xl font-semibold tracking-[-0.06em] text-white sm:text-4xl">
-            Scan #{id} is in progress.
-          </h2>
-        </div>
-        <div className="rounded-full border border-emerald-200/14 bg-emerald-300/10 px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] text-emerald-100/80">
-          {isRefreshing ? "Refreshing" : "Live"}
-        </div>
-      </div>
-
-      <div className="mt-8 grid gap-3 sm:grid-cols-2">
-        <StatusCard
-          icon={<Radar className="size-4" />}
-          label="Status"
-          value={formatEnumLabel(status)}
-        />
-        <StatusCard
-          icon={<ShieldCheck className="size-4" />}
-          label="Phase"
-          value={formatEnumLabel(phase)}
-        />
-      </div>
-    </article>
-  )
+  return <CompletedScanState scan={scan} isRefreshing={isRefreshing} />
 }
 
 type ErrorScanStateProps = {
@@ -401,6 +365,169 @@ function LoadingScanState({
   )
 }
 
+type CompletedScanStateProps = {
+  scan: ScanResponse
+  isRefreshing: boolean
+}
+
+function CompletedScanState({
+  scan,
+  isRefreshing,
+}: CompletedScanStateProps) {
+  const totalIssues = scan.accessibility.length + scan.inappropriate.length
+
+  return (
+    <div className="grid gap-6">
+      <WebsiteSummaryCard
+        url={scan.url}
+        createdAt={scan.created_at}
+        riskLevel={scan.risk_level}
+        totalIssues={totalIssues}
+        isRefreshing={isRefreshing}
+      />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <ScoreCard
+          title="Accessibility Score"
+          value={scan.accessibility_score ?? 0}
+          explanation="Counts the accessibility issues detected across the page."
+          icon={<EyeOff className="size-5" />}
+          tone={scoreToneFor(scan.accessibility_score ?? 0, false)}
+          max={12}
+        />
+        <ScoreCard
+          title="Inappropriate Score"
+          value={scan.inappropriate_score ?? 0}
+          explanation="Weighted score based on inappropriate or unsafe content findings."
+          icon={<BadgeAlert className="size-5" />}
+          tone={scoreToneFor(scan.inappropriate_score ?? 0, true)}
+          max={16}
+        />
+      </div>
+    </div>
+  )
+}
+
+type WebsiteSummaryCardProps = {
+  url: string
+  createdAt: string
+  riskLevel: ScanResponse["risk_level"]
+  totalIssues: number
+  isRefreshing: boolean
+}
+
+function WebsiteSummaryCard({
+  url,
+  createdAt,
+  riskLevel,
+  totalIssues,
+  isRefreshing,
+}: WebsiteSummaryCardProps) {
+  const riskTone = riskToneFor(riskLevel)
+
+  return (
+    <article className="rounded-[32px] border border-white/12 bg-white/7 p-8 shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-sm sm:p-10">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.32em] text-emerald-200/62">
+            Website summary
+          </p>
+          <h2 className="mt-4 text-3xl font-semibold tracking-[-0.06em] text-white sm:text-4xl">
+            Scan complete.
+          </h2>
+          <p className="mt-4 break-all text-base leading-7 text-emerald-50/74 sm:text-lg">
+            {url}
+          </p>
+        </div>
+        <div className="rounded-full border border-emerald-200/14 bg-emerald-300/10 px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] text-emerald-100/80">
+          {isRefreshing ? "Refreshing" : "Complete"}
+        </div>
+      </div>
+
+      <div className="mt-8 grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-[24px] border border-white/10 bg-black/18 p-5">
+          <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-emerald-100/55">
+            Scan timestamp
+          </p>
+          <p className="mt-3 text-lg font-semibold tracking-[-0.04em] text-white">
+            {formatScanTimestamp(createdAt)}
+          </p>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-1">
+          <div className={`rounded-[24px] border p-5 ${riskTone.panelClass}`}>
+            <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-white/55">
+              Risk level
+            </p>
+            <div className={`mt-3 inline-flex rounded-full border px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] ${riskTone.badgeClass}`}>
+              {riskLevel === null ? "Unavailable" : riskLevel}
+            </div>
+          </div>
+
+          <div className="rounded-[24px] border border-white/10 bg-black/18 p-5">
+            <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-emerald-100/55">
+              Total issues
+            </p>
+            <p className="mt-3 text-3xl font-semibold tracking-[-0.06em] text-white">
+              {totalIssues}
+            </p>
+          </div>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+type ScoreCardProps = {
+  title: string
+  value: number
+  explanation: string
+  icon: ReactNode
+  tone: ScoreTone
+  max: number
+}
+
+function ScoreCard({
+  title,
+  value,
+  explanation,
+  icon,
+  tone,
+  max,
+}: ScoreCardProps) {
+  const percentage = Math.min(100, Math.round((value / max) * 100))
+
+  return (
+    <article className={`rounded-[28px] border p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm ${tone.panelClass}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.28em] text-white/60">
+            {title}
+          </p>
+          <p className="mt-4 text-5xl font-semibold tracking-[-0.08em] text-white">
+            {value}
+          </p>
+        </div>
+        <div className={`rounded-2xl border p-3 ${tone.iconClass}`}>{icon}</div>
+      </div>
+
+      <p className="mt-5 text-sm leading-6 text-white/72">{explanation}</p>
+
+      <div className="mt-6">
+        <div className="mb-2 flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.24em] text-white/52">
+          <span>Severity</span>
+          <span>{percentage}%</span>
+        </div>
+        <div className="h-3 overflow-hidden rounded-full bg-black/22">
+          <div
+            className={`h-full rounded-full transition-[width] duration-500 ${tone.barClass}`}
+            style={{ width: `${Math.max(8, percentage)}%` }}
+          />
+        </div>
+      </div>
+    </article>
+  )
+}
+
 function StatusPanel() {
   return (
     <article className="rounded-[28px] border border-white/12 bg-white/8 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur-sm">
@@ -467,6 +594,19 @@ function formatEnumLabel(value: string) {
     .join(" ")
 }
 
+function formatScanTimestamp(value: string) {
+  const parsed = new Date(value)
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed)
+}
+
 function phaseMessageFor(phase: ScanPhase) {
   switch (phase) {
     case "accessibility":
@@ -499,5 +639,68 @@ function errorReasonMessageFor(errorReason: ScanErrorReason | null) {
       return "The scan stopped before results were produced. Please check the URL and try again."
     default:
       return "The scanner hit an unexpected website error. Please check the URL and try again."
+  }
+}
+
+type ScoreTone = {
+  panelClass: string
+  iconClass: string
+  barClass: string
+}
+
+function scoreToneFor(value: number, weighted: boolean): ScoreTone {
+  const mediumThreshold = weighted ? 5 : 3
+  const highThreshold = weighted ? 10 : 7
+
+  if (value >= highThreshold) {
+    return {
+      panelClass: "border-rose-200/14 bg-[linear-gradient(180deg,rgba(112,29,36,0.45)_0%,rgba(22,7,9,0.72)_100%)]",
+      iconClass: "border-rose-200/14 bg-rose-300/14 text-rose-100",
+      barClass: "bg-rose-300",
+    }
+  }
+
+  if (value >= mediumThreshold) {
+    return {
+      panelClass: "border-amber-200/14 bg-[linear-gradient(180deg,rgba(118,78,12,0.42)_0%,rgba(22,15,4,0.72)_100%)]",
+      iconClass: "border-amber-200/14 bg-amber-300/14 text-amber-100",
+      barClass: "bg-amber-300",
+    }
+  }
+
+  return {
+    panelClass: "border-emerald-200/14 bg-[linear-gradient(180deg,rgba(16,104,74,0.36)_0%,rgba(7,19,15,0.72)_100%)]",
+    iconClass: "border-emerald-200/14 bg-emerald-300/14 text-emerald-100",
+    barClass: "bg-emerald-300",
+  }
+}
+
+function riskToneFor(riskLevel: ScanResponse["risk_level"]) {
+  switch (riskLevel) {
+    case "critical":
+      return {
+        panelClass: "border-rose-200/14 bg-rose-300/10",
+        badgeClass: "border-rose-200/16 bg-rose-300/14 text-rose-100",
+      }
+    case "high":
+      return {
+        panelClass: "border-orange-200/14 bg-orange-300/10",
+        badgeClass: "border-orange-200/16 bg-orange-300/14 text-orange-100",
+      }
+    case "medium":
+      return {
+        panelClass: "border-amber-200/14 bg-amber-300/10",
+        badgeClass: "border-amber-200/16 bg-amber-300/14 text-amber-100",
+      }
+    case "low":
+      return {
+        panelClass: "border-emerald-200/14 bg-emerald-300/10",
+        badgeClass: "border-emerald-200/16 bg-emerald-300/14 text-emerald-100",
+      }
+    case null:
+      return {
+        panelClass: "border-white/10 bg-white/6",
+        badgeClass: "border-white/10 bg-white/8 text-white/72",
+      }
   }
 }

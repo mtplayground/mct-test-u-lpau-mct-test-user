@@ -66,6 +66,8 @@ export type CategoryBreakdownItem = {
 
 export type ScanResponse = {
   id: number
+  url: string
+  created_at: string
   status: ScanStatus
   phase: ScanPhase
   accessibility_score: number | null

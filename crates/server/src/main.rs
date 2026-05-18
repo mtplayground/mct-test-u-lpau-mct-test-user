@@ -259,6 +259,8 @@ struct CreateScanResponse {
 #[derive(Debug, Deserialize, Serialize)]
 struct GetScanResponse {
     id: i64,
+    url: String,
+    created_at: String,
     status: String,
     phase: String,
     accessibility_score: Option<i32>,
@@ -449,6 +451,8 @@ fn build_scan_response(scan: Scan, findings: Vec<Finding>) -> GetScanResponse {
 
     GetScanResponse {
         id: scan.id,
+        url: scan.url,
+        created_at: scan.created_at.to_string(),
         status: scan.status.as_str().to_owned(),
         phase: scan.phase.as_str().to_owned(),
         accessibility_score: scan.accessibility_score,
