@@ -11,6 +11,14 @@ export type ScanPhase =
 
 export type RiskLevel = "low" | "medium" | "high" | "critical"
 
+export type ScanErrorReason =
+  | "invalid_url"
+  | "unreachable"
+  | "blocked"
+  | "timeout"
+  | "no_content"
+  | (string & {})
+
 export type FindingCategory =
   | "accessibility"
   | "adult_content"
@@ -63,7 +71,7 @@ export type ScanResponse = {
   accessibility_score: number | null
   inappropriate_score: number | null
   risk_level: RiskLevel | null
-  error_reason: string | null
+  error_reason: ScanErrorReason | null
   accessibility: FindingDto[]
   inappropriate: FindingDto[]
   category_breakdown: CategoryBreakdownItem[] | null
