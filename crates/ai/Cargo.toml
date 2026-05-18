@@ -9,6 +9,7 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 url.workspace = true
+zeroclaw-core = { path = "../core" }
 
 [dev-dependencies]
 axum.workspace = true

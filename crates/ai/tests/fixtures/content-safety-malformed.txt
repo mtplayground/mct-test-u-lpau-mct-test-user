@@ -1,0 +1,13 @@
+The JSON is below:
+
+{
+  "summary": "Broken payload",
+  "findings": [
+    {
+      "title": "Bad example",
+      "category": "weapons",
+      "severity": "high",
+      "summary": "This object has a trailing comma",
+    }
+  ]
+}
