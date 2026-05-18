@@ -1,14 +1,16 @@
 mod config;
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::{net::{IpAddr, Ipv4Addr, SocketAddr}, sync::Arc};
 
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     http::StatusCode,
-    response::IntoResponse,
-    routing::get,
-    Router,
+    response::{IntoResponse, Response},
+    routing::{get, post},
+    Json, Router,
 };
+use serde::{Deserialize, Serialize};
+use time::{Duration, OffsetDateTime};
 use tokio::{net::TcpListener, signal};
 use tower_http::{
     services::{ServeDir, ServeFile},
@@ -16,7 +18,10 @@ use tower_http::{
 };
 use tracing::{info, Level};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use zeroclaw_storage::{Database, DatabaseError};
+use zeroclaw_core::{
+    validate_scan_url, NewScan, ScanPhase, ScanStatus, UrlValidationError,
+};
+use zeroclaw_storage::{Database, DatabaseError, Repository, RepositoryError};
 
 use crate::config::{Config, ConfigError};
 
@@ -28,7 +33,9 @@ async fn main() -> Result<(), AppError> {
     let database = Database::connect(&config.database_url)
         .await
         .map_err(AppError::Database)?;
-    let app = build_router();
+    let app = build_router(AppState {
+        repository: Arc::new(Repository::new(database.pool().clone())),
+    });
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port);
     let listener = TcpListener::bind(addr).await.map_err(AppError::Bind)?;
 
@@ -48,10 +55,11 @@ async fn main() -> Result<(), AppError> {
         .map_err(AppError::Serve)
 }
 
-fn build_router() -> Router {
+fn build_router(state: AppState) -> Router {
     Router::new()
         .nest("/api", api_router())
         .fallback_service(spa_service())
+        .with_state(state)
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<_>| {
                 tracing::span!(
@@ -64,9 +72,10 @@ fn build_router() -> Router {
         )
 }
 
-fn api_router() -> Router {
+fn api_router() -> Router<AppState> {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/scans", post(create_scan))
         .fallback(api_not_found)
 }
 
@@ -80,6 +89,56 @@ async fn healthz() -> impl IntoResponse {
 
 async fn api_not_found() -> impl IntoResponse {
     StatusCode::NOT_FOUND
+}
+
+async fn create_scan(
+    State(state): State<AppState>,
+    Json(request): Json<CreateScanRequest>,
+) -> Result<Json<CreateScanResponse>, ApiError> {
+    let validated = validate_scan_url(&request.url)
+        .map_err(|source| ApiError::Validation(ValidationError::new(source)))?;
+    let force = request.force.unwrap_or(false);
+
+    if !force {
+        if let Some(scan) = state
+            .repository
+            .find_recent_completed_by_url(&validated.normalized_url)
+            .await
+            .map_err(ApiError::Repository)?
+        {
+            let age = OffsetDateTime::now_utc() - scan.updated_at;
+            if age <= Duration::hours(24) {
+                return Ok(Json(CreateScanResponse {
+                    id: scan.id,
+                    cached: true,
+                }));
+            }
+        }
+    }
+
+    let scan = state
+        .repository
+        .insert_scan(&NewScan {
+            url: request.url,
+            normalized_url: validated.normalized_url,
+            status: ScanStatus::Pending,
+            phase: ScanPhase::Queued,
+        })
+        .await
+        .map_err(ApiError::Repository)?;
+
+    spawn_worker_stub(scan.id);
+
+    Ok(Json(CreateScanResponse {
+        id: scan.id,
+        cached: false,
+    }))
+}
+
+fn spawn_worker_stub(scan_id: i64) {
+    tokio::spawn(async move {
+        tracing::info!(scan_id, "worker stub spawned for scan");
+    });
 }
 
 fn init_tracing() -> Result<(), AppError> {
@@ -144,3 +203,78 @@ impl std::fmt::Display for AppError {
 }
 
 impl std::error::Error for AppError {}
+
+#[derive(Clone)]
+struct AppState {
+    repository: Arc<Repository>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateScanRequest {
+    url: String,
+    force: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateScanResponse {
+    id: i64,
+    cached: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorResponse {
+    error: String,
+}
+
+#[derive(Debug)]
+enum ApiError {
+    Repository(RepositoryError),
+    Validation(ValidationError),
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Validation(error) => (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: error.friendly_message().to_owned(),
+                }),
+            )
+                .into_response(),
+            Self::Repository(error) => {
+                tracing::error!(error = %error, "request failed");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: "Something went wrong while creating the scan.".to_owned(),
+                    }),
+                )
+                    .into_response()
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ValidationError {
+    source: UrlValidationError,
+}
+
+impl ValidationError {
+    fn new(source: UrlValidationError) -> Self {
+        Self { source }
+    }
+
+    fn friendly_message(&self) -> &'static str {
+        "Please enter a valid public http:// or https:// URL."
+    }
+}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({})", self.friendly_message(), self.source)
+    }
+}
+
+impl std::error::Error for ValidationError {}

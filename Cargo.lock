@@ -2142,10 +2142,13 @@ name = "zeroclaw-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "serde",
+ "time",
  "tokio",
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "zeroclaw-core",
  "zeroclaw-storage",
 ]
 
