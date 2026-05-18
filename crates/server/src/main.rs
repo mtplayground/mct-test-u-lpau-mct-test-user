@@ -1,4 +1,5 @@
 mod config;
+mod db;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -9,22 +10,25 @@ use tracing::{info, Level};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use crate::config::{Config, ConfigError};
+use crate::db::{Database, DatabaseError};
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     init_tracing()?;
 
     let config = Config::from_env().map_err(AppError::Config)?;
+    let database = Database::connect(&config).await.map_err(AppError::Database)?;
     let app = build_router();
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port);
     let listener = TcpListener::bind(addr).await.map_err(AppError::Bind)?;
 
     info!(
         address = %addr,
+        database_connections = database.pool().size(),
+        anthropic_key_configured = !config.anthropic_api_key.is_empty(),
         chromium_path = %config.chromium_path.display(),
         scan_timeout_secs = config.scan_timeout.as_secs(),
-        database_configured = !config.database_url.is_empty(),
-        anthropic_key_configured = !config.anthropic_api_key.is_empty(),
+        migrations_ran = true,
         "server listening"
     );
 
@@ -97,6 +101,7 @@ async fn shutdown_signal() {
 enum AppError {
     Bind(std::io::Error),
     Config(ConfigError),
+    Database(DatabaseError),
     Serve(std::io::Error),
     Tracing(tracing_subscriber::util::TryInitError),
 }
@@ -106,6 +111,7 @@ impl std::fmt::Display for AppError {
         match self {
             Self::Bind(error) => write!(f, "failed to bind TCP listener: {error}"),
             Self::Config(error) => write!(f, "{error}"),
+            Self::Database(error) => write!(f, "{error}"),
             Self::Serve(error) => write!(f, "server exited with error: {error}"),
             Self::Tracing(error) => write!(f, "failed to initialize tracing: {error}"),
         }
