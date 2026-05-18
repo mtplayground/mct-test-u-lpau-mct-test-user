@@ -336,6 +336,13 @@ impl BrowserSessionError {
         Self { reason, message }
     }
 
+    pub fn from_reason(reason: BrowserSessionErrorReason, message: impl Into<String>) -> Self {
+        Self {
+            reason,
+            message: message.into(),
+        }
+    }
+
     pub fn error_reason(&self) -> &'static str {
         self.reason.as_error_reason()
     }

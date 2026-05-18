@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ai", "crates/browser", "crates/core", "crates/server", "crates/storage"]
+members = ["crates/ai", "crates/browser", "crates/core", "crates/server", "crates/storage", "crates/worker"]
 resolver = "2"
 
 [workspace.package]
@@ -8,6 +8,7 @@ license = "MIT"
 version = "0.1.0"
 
 [workspace.dependencies]
+async-trait = "0.1"
 axum = "0.8"
 chromiumoxide = "0.9.1"
 futures-util = "0.3"
