@@ -2764,6 +2764,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zeroclaw-ai"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "zeroclaw-browser"
 version = "0.1.0"
 dependencies = [
