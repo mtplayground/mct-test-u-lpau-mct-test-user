@@ -2813,6 +2813,7 @@ dependencies = [
 name = "zeroclaw-server"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "reqwest 0.12.28",
  "serde",
@@ -2824,8 +2825,11 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "zeroclaw-ai",
+ "zeroclaw-browser",
  "zeroclaw-core",
  "zeroclaw-storage",
+ "zeroclaw-worker",
 ]
 
 [[package]]

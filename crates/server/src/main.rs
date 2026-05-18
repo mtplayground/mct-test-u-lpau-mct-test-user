@@ -18,11 +18,15 @@ use tower_http::{
 };
 use tracing::{info, Level};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use zeroclaw_ai::{AnthropicClient, AnthropicClientConfig};
 use zeroclaw_core::{
     category_breakdown, validate_scan_url, Category, Finding, FindingKind, NewScan, Scan,
     ScanPhase, ScanStatus, UrlValidationError,
 };
 use zeroclaw_storage::{Database, DatabaseError, Repository, RepositoryError};
+use zeroclaw_worker::{
+    ChromiumPageAnalyzer, ContentSafetyClient, PageAnalyzer, ScanWorker, WorkerConfig,
+};
 
 use crate::config::{Config, ConfigError};
 
@@ -34,9 +38,20 @@ async fn main() -> Result<(), AppError> {
     let database = Database::connect(&config.database_url)
         .await
         .map_err(AppError::Database)?;
+    let repository = Arc::new(Repository::new(database.pool().clone()));
+    let worker_config = WorkerConfig {
+        chromium_path: config.chromium_path.clone(),
+        scan_timeout: config.scan_timeout,
+    };
     let app = build_router(AppState {
-        repository: Arc::new(Repository::new(database.pool().clone())),
-        worker_dispatcher: Arc::new(LoggingWorker),
+        repository: repository.clone(),
+        worker_dispatcher: Arc::new(SpawnedScanWorkerDispatcher::new(
+            Arc::new(ChromiumPageAnalyzer),
+            Arc::new(AnthropicClient::new(AnthropicClientConfig::new(
+                config.anthropic_api_key.clone(),
+            ))),
+            worker_config,
+        )),
     });
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port);
     let listener = TcpListener::bind(addr).await.map_err(AppError::Bind)?;
@@ -344,12 +359,43 @@ trait WorkerDispatcher: Send + Sync {
     fn dispatch(&self, scan_id: i64, repository: Arc<Repository>);
 }
 
-struct LoggingWorker;
+struct SpawnedScanWorkerDispatcher<P, C> {
+    page_analyzer: Arc<P>,
+    content_safety_client: Arc<C>,
+    worker_config: WorkerConfig,
+}
 
-impl WorkerDispatcher for LoggingWorker {
-    fn dispatch(&self, scan_id: i64, _repository: Arc<Repository>) {
+impl<P, C> SpawnedScanWorkerDispatcher<P, C> {
+    fn new(
+        page_analyzer: Arc<P>,
+        content_safety_client: Arc<C>,
+        worker_config: WorkerConfig,
+    ) -> Self {
+        Self {
+            page_analyzer,
+            content_safety_client,
+            worker_config,
+        }
+    }
+}
+
+impl<P, C> WorkerDispatcher for SpawnedScanWorkerDispatcher<P, C>
+where
+    P: PageAnalyzer + 'static,
+    C: ContentSafetyClient + 'static,
+{
+    fn dispatch(&self, scan_id: i64, repository: Arc<Repository>) {
+        let worker = ScanWorker::new(
+            repository,
+            self.page_analyzer.clone(),
+            self.content_safety_client.clone(),
+            self.worker_config.clone(),
+        );
+
         tokio::spawn(async move {
-            tracing::info!(scan_id, "worker stub spawned for scan");
+            if let Err(error) = worker.run_scan(scan_id).await {
+                tracing::error!(scan_id, error = %error, "scan worker failed");
+            }
         });
     }
 }
@@ -426,21 +472,25 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use axum::http::StatusCode;
+    use axum::{http::StatusCode, routing::get, Router as AxumRouter};
     use reqwest::Client;
     use serial_test::serial;
     use sqlx::{postgres::PgPoolOptions, Executor};
     use time::OffsetDateTime;
     use tokio::{net::TcpListener as TokioTcpListener, task::JoinHandle, time::sleep};
-    use zeroclaw_core::{
-        NewFinding, RiskLevel, ScanScoreUpdate, ScanStatusUpdate, Severity,
-    };
+    use zeroclaw_ai::AnthropicClientError;
+    use zeroclaw_browser::{AxeImpact, AxeNode, AxeViolation, BrowserSessionError};
+    use zeroclaw_core::{RiskLevel, Severity};
     use zeroclaw_storage::{migrate, Repository};
+    use zeroclaw_worker::{
+        ContentSafetyClient as WorkerContentSafetyClient, PageAnalysis,
+        PageAnalyzer as WorkerPageAnalyzer, WorkerConfig,
+    };
 
     use super::{
         build_router, build_scan_response, AppState, Category, CreateScanResponse,
-        ErrorResponse, Finding, FindingKind, GetScanResponse, LoggingWorker, Scan, ScanPhase,
-        ScanStatus, WorkerDispatcher,
+        ErrorResponse, Finding, FindingKind, GetScanResponse, Scan, ScanPhase, ScanStatus,
+        SpawnedScanWorkerDispatcher, WorkerDispatcher,
     };
 
     const PG_BIN_DIR: &str = "/usr/lib/postgresql/16/bin";
@@ -448,7 +498,31 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn post_then_poll_happy_path_returns_completed_scan_results() -> Result<(), Box<dyn Error>> {
-        let test_app = TestApp::spawn(Arc::new(CompletedWorkerStub)).await?;
+        let fixture = FixtureHtmlServer::spawn().await?;
+        let worker_dispatcher = Arc::new(SpawnedScanWorkerDispatcher::new(
+            Arc::new(FixturePageAnalyzer::new(fixture.base_url.clone())),
+            Arc::new(StaticContentSafetyClient::new(
+                r#"{
+                    "summary":"Fixture page contains weapon marketing content.",
+                    "findings":[
+                        {
+                            "title":"Weapon promotion",
+                            "category":"weapons",
+                            "severity":"high",
+                            "summary":"The page promotes weapon purchases.",
+                            "example_excerpt":"Buy tactical rifles today.",
+                            "why_unsafe":"It encourages acquiring weapons.",
+                            "recommended_action":"Remove direct purchase language."
+                        }
+                    ]
+                }"#,
+            )),
+            WorkerConfig {
+                chromium_path: PathBuf::from("/usr/bin/chromium"),
+                scan_timeout: std::time::Duration::from_secs(30),
+            },
+        ));
+        let test_app = TestApp::spawn(worker_dispatcher).await?;
         let client = Client::new();
 
         let create_response = client
@@ -472,6 +546,11 @@ mod tests {
         assert_eq!(polled.risk_level.as_deref(), Some("high"));
         assert_eq!(polled.accessibility.len(), 1);
         assert_eq!(polled.inappropriate.len(), 1);
+        assert_eq!(
+            polled.accessibility[0].title,
+            "Images must have alternative text"
+        );
+        assert_eq!(polled.inappropriate[0].title, "Weapon promotion");
 
         let breakdown = polled
             .category_breakdown
@@ -485,7 +564,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn post_scan_rejects_invalid_url() -> Result<(), Box<dyn Error>> {
-        let test_app = TestApp::spawn(Arc::new(LoggingWorker)).await?;
+        let test_app = TestApp::spawn(Arc::new(NoopWorker)).await?;
         let client = Client::new();
 
         let response = client
@@ -506,7 +585,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn get_scan_returns_not_found_for_unknown_id() -> Result<(), Box<dyn Error>> {
-        let test_app = TestApp::spawn(Arc::new(LoggingWorker)).await?;
+        let test_app = TestApp::spawn(Arc::new(NoopWorker)).await?;
         let client = Client::new();
 
         let response = client.get(test_app.url("/api/scans/999999")).send().await?;
@@ -675,74 +754,125 @@ mod tests {
         }
     }
 
-    struct CompletedWorkerStub;
+    struct NoopWorker;
 
-    impl WorkerDispatcher for CompletedWorkerStub {
-        fn dispatch(&self, scan_id: i64, repository: Arc<Repository>) {
-            tokio::spawn(async move {
-                let _ = repository
-                    .update_scan_status(
-                        scan_id,
-                        &ScanStatusUpdate {
-                            status: ScanStatus::Running,
-                            phase: ScanPhase::Accessibility,
-                            error_reason: None,
-                        },
-                    )
-                    .await;
+    impl WorkerDispatcher for NoopWorker {
+        fn dispatch(&self, _scan_id: i64, _repository: Arc<Repository>) {}
+    }
 
-                let _ = repository
-                    .insert_findings_batch(
-                        scan_id,
-                        &[
-                            NewFinding {
-                                kind: FindingKind::Accessibility,
-                                title: "Missing alt text".to_owned(),
-                                category: Category::Accessibility,
-                                severity: Severity::Low,
-                                summary: "Decorative image missing alt".to_owned(),
-                                location: Some("img.hero".to_owned()),
-                                suggestion: Some("Add alt text".to_owned()),
-                                example_excerpt: None,
-                                why_unsafe: None,
-                            },
-                            NewFinding {
-                                kind: FindingKind::ContentSafety,
-                                title: "Weapon promotion".to_owned(),
-                                category: Category::Weapons,
-                                severity: Severity::High,
-                                summary: "Page markets weapons".to_owned(),
-                                location: None,
-                                suggestion: Some("Remove the promotion".to_owned()),
-                                example_excerpt: Some("Buy tactical rifles today".to_owned()),
-                                why_unsafe: Some("Promotes weapon acquisition.".to_owned()),
-                            },
-                        ],
-                    )
-                    .await;
+    struct FixtureHtmlServer {
+        base_url: String,
+        server: JoinHandle<()>,
+    }
 
-                let _ = repository
-                    .update_scan_scores(
-                        scan_id,
-                        &ScanScoreUpdate {
-                            accessibility_score: Some(1),
-                            inappropriate_score: Some(8),
-                            risk_level: Some(RiskLevel::High),
-                        },
-                    )
-                    .await;
+    impl FixtureHtmlServer {
+        async fn spawn() -> Result<Self, Box<dyn Error>> {
+            async fn handler() -> &'static str {
+                r#"<!doctype html>
+                <html>
+                  <body>
+                    <img class="hero" src="/hero.png">
+                    <button class="cta"></button>
+                    <p>Buy tactical rifles today.</p>
+                  </body>
+                </html>"#
+            }
 
-                let _ = repository
-                    .update_scan_status(
-                        scan_id,
-                        &ScanStatusUpdate {
-                            status: ScanStatus::Completed,
-                            phase: ScanPhase::Completed,
-                            error_reason: None,
-                        },
-                    )
-                    .await;
+            let app = AxumRouter::new().route("/", get(handler));
+            let listener = TokioTcpListener::bind("127.0.0.1:0").await?;
+            let address = listener.local_addr()?;
+            let server = tokio::spawn(async move {
+                let _ = axum::serve(listener, app).await;
             });
+
+            Ok(Self {
+                base_url: format!("http://{address}"),
+                server,
+            })
+        }
+    }
+
+    impl Drop for FixtureHtmlServer {
+        fn drop(&mut self) {
+            self.server.abort();
+        }
+    }
+
+    struct FixturePageAnalyzer {
+        fixture_url: String,
+        http_client: Client,
+    }
+
+    impl FixturePageAnalyzer {
+        fn new(fixture_url: String) -> Self {
+            Self {
+                fixture_url,
+                http_client: Client::new(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl WorkerPageAnalyzer for FixturePageAnalyzer {
+        async fn analyze_page(
+            &self,
+            _url: &str,
+            _config: &WorkerConfig,
+        ) -> Result<PageAnalysis, BrowserSessionError> {
+            let html = self.http_client.get(&self.fixture_url).send().await
+                .map_err(|error| BrowserSessionError::from_reason(
+                    zeroclaw_browser::BrowserSessionErrorReason::NavigationFailed,
+                    error.to_string(),
+                ))?
+                .text()
+                .await
+                .map_err(|error| BrowserSessionError::from_reason(
+                    zeroclaw_browser::BrowserSessionErrorReason::NavigationFailed,
+                    error.to_string(),
+                ))?;
+
+            Ok(PageAnalysis {
+                accessibility_violations: vec![AxeViolation {
+                    id: "image-alt".to_owned(),
+                    impact: AxeImpact::Minor,
+                    severity: Severity::Low,
+                    description: "Ensures <img> elements have alternate text or a role of none or presentation".to_owned(),
+                    help: "Images must have alternative text".to_owned(),
+                    help_url: "https://dequeuniversity.com/rules/axe/4.11/image-alt?application=axeAPI".to_owned(),
+                    tags: vec!["cat.text-alternatives".to_owned()],
+                    nodes: vec![AxeNode {
+                        html: "<img class=\"hero\" src=\"/hero.png\">".to_owned(),
+                        target: vec!["img.hero".to_owned()],
+                        failure_summary: Some("Fix any of the following: Element does not have an alt attribute".to_owned()),
+                        any: vec![],
+                        all: vec![],
+                        none: vec![],
+                    }],
+                }],
+                visible_text: html,
+            })
+        }
+    }
+
+    struct StaticContentSafetyClient {
+        response: String,
+    }
+
+    impl StaticContentSafetyClient {
+        fn new(response: &str) -> Self {
+            Self {
+                response: response.to_owned(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl WorkerContentSafetyClient for StaticContentSafetyClient {
+        async fn classify_extracted_text(
+            &self,
+            _extracted_text: &str,
+        ) -> Result<String, AnthropicClientError> {
+            Ok(self.response.clone())
         }
     }
 
