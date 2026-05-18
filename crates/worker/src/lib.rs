@@ -1,6 +1,7 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use url::Url;
 use zeroclaw_ai::{
     map_content_safety_findings, parse_content_safety_response, AnthropicClient,
     AnthropicClientError, AnthropicClientErrorKind,
@@ -19,6 +20,7 @@ use zeroclaw_storage::{Repository, RepositoryError};
 pub struct WorkerConfig {
     pub chromium_path: PathBuf,
     pub scan_timeout: Duration,
+    pub allow_private_urls: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,8 +78,8 @@ where
             .map_err(ScanWorkerError::store)?
             .ok_or(ScanWorkerError::scan_not_found(scan_id))?;
 
-        let validated_url = match validate_scan_url(&scan.url) {
-            Ok(validated) => validated.normalized_url,
+        let validated_url = match normalize_scan_url(&scan.url, self.config.allow_private_urls) {
+            Ok(validated) => validated,
             Err(error) => {
                 let failure = ScanFailureReason::from_url_validation_error(&error);
                 self.mark_failed(scan_id, failure).await?;
@@ -220,6 +222,28 @@ where
             .ok_or(ScanWorkerError::scan_not_found(scan_id))?;
 
         Ok(())
+    }
+}
+
+fn normalize_scan_url(input: &str, allow_private_urls: bool) -> Result<String, UrlValidationError> {
+    if !allow_private_urls {
+        return validate_scan_url(input).map(|validated| validated.normalized_url);
+    }
+
+    let url = Url::parse(input).map_err(UrlValidationError::InvalidUrl)?;
+
+    match url.scheme() {
+        "http" | "https" => {}
+        scheme => {
+            return Err(UrlValidationError::UnsupportedScheme {
+                scheme: scheme.to_owned(),
+            });
+        }
+    }
+
+    match url.host_str() {
+        Some(host) if !host.trim().is_empty() => Ok(url.to_string()),
+        _ => Err(UrlValidationError::EmptyHost),
     }
 }
 
@@ -595,6 +619,7 @@ mod tests {
         WorkerConfig {
             chromium_path: PathBuf::from("/usr/bin/chromium"),
             scan_timeout: Duration::from_secs(30),
+            allow_private_urls: false,
         }
     }
 

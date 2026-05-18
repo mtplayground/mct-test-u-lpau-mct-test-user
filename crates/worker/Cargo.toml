@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 async-trait.workspace = true
 time.workspace = true
+url.workspace = true
 zeroclaw-ai = { path = "../ai" }
 zeroclaw-browser = { path = "../browser" }
 zeroclaw-core = { path = "../core" }

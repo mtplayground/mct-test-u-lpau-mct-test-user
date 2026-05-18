@@ -2,6 +2,7 @@ mod config;
 
 use std::{net::{IpAddr, Ipv4Addr, SocketAddr}, str::FromStr, sync::Arc};
 
+use async_trait::async_trait;
 use axum::{
     extract::{Path, Request, State},
     http::StatusCode,
@@ -9,6 +10,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 use tokio::{net::TcpListener, signal};
@@ -18,10 +20,14 @@ use tower_http::{
 };
 use tracing::{info, Level};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use zeroclaw_ai::{AnthropicClient, AnthropicClientConfig};
+use url::Url;
+use zeroclaw_ai::{AnthropicClient, AnthropicClientConfig, AnthropicClientError};
+use zeroclaw_browser::{
+    AxeImpact, AxeNode, AxeViolation, BrowserSessionError, BrowserSessionErrorReason,
+};
 use zeroclaw_core::{
     category_breakdown, recommendations_text, validate_scan_url, Category, Finding, FindingKind, NewScan, Scan,
-    ScanPhase, ScanStatus, UrlValidationError,
+    ScanPhase, ScanStatus, Severity, UrlValidationError,
 };
 use zeroclaw_storage::{Database, DatabaseError, Repository, RepositoryError};
 use zeroclaw_worker::{
@@ -42,16 +48,13 @@ async fn main() -> Result<(), AppError> {
     let worker_config = WorkerConfig {
         chromium_path: config.chromium_path.clone(),
         scan_timeout: config.scan_timeout,
+        allow_private_urls: config.allow_private_urls,
     };
+    let worker_dispatcher = build_worker_dispatcher(&config, worker_config);
     let app = build_router(AppState {
         repository: repository.clone(),
-        worker_dispatcher: Arc::new(SpawnedScanWorkerDispatcher::new(
-            Arc::new(ChromiumPageAnalyzer),
-            Arc::new(AnthropicClient::new(AnthropicClientConfig::new(
-                config.anthropic_api_key.clone(),
-            ))),
-            worker_config,
-        )),
+        worker_dispatcher,
+        allow_private_urls: config.allow_private_urls,
     });
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port);
     let listener = TcpListener::bind(addr).await.map_err(AppError::Bind)?;
@@ -113,14 +116,14 @@ async fn create_scan(
     State(state): State<AppState>,
     Json(request): Json<CreateScanRequest>,
 ) -> Result<Json<CreateScanResponse>, ApiError> {
-    let validated = validate_scan_url(&request.url)
+    let normalized_url = validate_request_url(&request.url, state.allow_private_urls)
         .map_err(|source| ApiError::Validation(ValidationError::new(source)))?;
     let force = request.force.unwrap_or(false);
 
     if !force {
         if let Some(scan) = state
             .repository
-            .find_recent_completed_by_url(&validated.normalized_url)
+            .find_recent_completed_by_url(&normalized_url)
             .await
             .map_err(ApiError::Repository)?
         {
@@ -138,7 +141,7 @@ async fn create_scan(
         .repository
         .insert_scan(&NewScan {
             url: request.url,
-            normalized_url: validated.normalized_url,
+            normalized_url,
             status: ScanStatus::Pending,
             phase: ScanPhase::Queued,
         })
@@ -242,6 +245,7 @@ impl std::error::Error for AppError {}
 struct AppState {
     repository: Arc<Repository>,
     worker_dispatcher: Arc<dyn WorkerDispatcher>,
+    allow_private_urls: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -340,6 +344,31 @@ struct ValidationError {
     source: UrlValidationError,
 }
 
+fn validate_request_url(
+    input: &str,
+    allow_private_urls: bool,
+) -> Result<String, UrlValidationError> {
+    if !allow_private_urls {
+        return validate_scan_url(input).map(|validated| validated.normalized_url);
+    }
+
+    let url = Url::parse(input).map_err(UrlValidationError::InvalidUrl)?;
+
+    match url.scheme() {
+        "http" | "https" => {}
+        scheme => {
+            return Err(UrlValidationError::UnsupportedScheme {
+                scheme: scheme.to_owned(),
+            });
+        }
+    }
+
+    match url.host_str() {
+        Some(host) if !host.trim().is_empty() => Ok(url.to_string()),
+        _ => Err(UrlValidationError::EmptyHost),
+    }
+}
+
 impl ValidationError {
     fn new(source: UrlValidationError) -> Self {
         Self { source }
@@ -360,6 +389,26 @@ impl std::error::Error for ValidationError {}
 
 trait WorkerDispatcher: Send + Sync {
     fn dispatch(&self, scan_id: i64, repository: Arc<Repository>);
+}
+
+fn build_worker_dispatcher(
+    config: &Config,
+    worker_config: WorkerConfig,
+) -> Arc<dyn WorkerDispatcher> {
+    match config.e2e_fixture_url.as_deref() {
+        Some(fixture_url) => Arc::new(SpawnedScanWorkerDispatcher::new(
+            Arc::new(E2eFixturePageAnalyzer::new(fixture_url.to_owned())),
+            Arc::new(StaticContentSafetyClient::default()),
+            worker_config,
+        )),
+        None => Arc::new(SpawnedScanWorkerDispatcher::new(
+            Arc::new(ChromiumPageAnalyzer),
+            Arc::new(AnthropicClient::new(AnthropicClientConfig::new(
+                config.anthropic_api_key.clone(),
+            ))),
+            worker_config,
+        )),
+    }
 }
 
 struct SpawnedScanWorkerDispatcher<P, C> {
@@ -400,6 +449,107 @@ where
                 tracing::error!(scan_id, error = %error, "scan worker failed");
             }
         });
+    }
+}
+
+#[derive(Debug)]
+struct E2eFixturePageAnalyzer {
+    fixture_url: String,
+    http_client: Client,
+}
+
+impl E2eFixturePageAnalyzer {
+    fn new(fixture_url: String) -> Self {
+        Self {
+            fixture_url,
+            http_client: Client::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl PageAnalyzer for E2eFixturePageAnalyzer {
+    async fn analyze_page(
+        &self,
+        _url: &str,
+        _config: &WorkerConfig,
+    ) -> Result<zeroclaw_worker::PageAnalysis, BrowserSessionError> {
+        let html = self
+            .http_client
+            .get(&self.fixture_url)
+            .send()
+            .await
+            .map_err(|error| {
+                BrowserSessionError::from_reason(
+                    BrowserSessionErrorReason::NavigationFailed,
+                    error.to_string(),
+                )
+            })?
+            .text()
+            .await
+            .map_err(|error| {
+                BrowserSessionError::from_reason(
+                    BrowserSessionErrorReason::NavigationFailed,
+                    error.to_string(),
+                )
+            })?;
+
+        Ok(zeroclaw_worker::PageAnalysis {
+            accessibility_violations: vec![AxeViolation {
+                id: "image-alt".to_owned(),
+                impact: AxeImpact::Minor,
+                severity: Severity::Low,
+                description:
+                    "Ensures <img> elements have alternate text or a role of none or presentation"
+                        .to_owned(),
+                help: "Images must have alternative text".to_owned(),
+                help_url:
+                    "https://dequeuniversity.com/rules/axe/4.11/image-alt?application=axeAPI"
+                        .to_owned(),
+                tags: vec!["cat.text-alternatives".to_owned()],
+                nodes: vec![AxeNode {
+                    html: "<img class=\"hero\" src=\"/hero.png\">".to_owned(),
+                    target: vec!["img.hero".to_owned()],
+                    failure_summary: Some(
+                        "Fix any of the following: Element does not have an alt attribute"
+                            .to_owned(),
+                    ),
+                    any: vec![],
+                    all: vec![],
+                    none: vec![],
+                }],
+            }],
+            visible_text: html,
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+struct StaticContentSafetyClient;
+
+#[async_trait]
+impl ContentSafetyClient for StaticContentSafetyClient {
+    async fn classify_extracted_text(
+        &self,
+        _extracted_text: &str,
+    ) -> Result<String, AnthropicClientError> {
+        Ok(
+            r#"{
+                "summary":"Fixture page contains weapon marketing content.",
+                "findings":[
+                    {
+                        "title":"Weapon promotion",
+                        "category":"weapons",
+                        "severity":"high",
+                        "summary":"The page promotes weapon purchases.",
+                        "example_excerpt":"Buy tactical rifles today.",
+                        "why_unsafe":"It encourages acquiring weapons.",
+                        "recommended_action":"Remove direct purchase language."
+                    }
+                ]
+            }"#
+            .to_owned(),
+        )
     }
 }
 
@@ -544,6 +694,7 @@ mod tests {
             WorkerConfig {
                 chromium_path: PathBuf::from("/usr/bin/chromium"),
                 scan_timeout: std::time::Duration::from_secs(30),
+                allow_private_urls: false,
             },
         ));
         let test_app = TestApp::spawn(worker_dispatcher).await?;
@@ -732,6 +883,7 @@ mod tests {
             let app = build_router(AppState {
                 repository: Arc::new(Repository::new(pool.clone())),
                 worker_dispatcher,
+                allow_private_urls: false,
             });
 
             let listener = TokioTcpListener::bind("127.0.0.1:0").await?;

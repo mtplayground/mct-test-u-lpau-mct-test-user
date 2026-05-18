@@ -56,7 +56,10 @@ function App() {
     } catch (error) {
       if (error instanceof ApiClientError) {
         setValidationMessage(error.message)
+        return
       }
+
+      setValidationMessage("Unable to start the scan right now. Please try again.")
     }
   }
 
@@ -73,7 +76,10 @@ function App() {
     } catch (error) {
       if (error instanceof ApiClientError) {
         setValidationMessage(error.message)
+        return
       }
+
+      setValidationMessage("Unable to start the scan right now. Please try again.")
     }
   }
 
@@ -162,8 +168,14 @@ function App() {
 
         <section className="grid flex-1 gap-6 pb-10 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="space-y-6">
-            {activeScan.data === undefined ? (
+            {activeScanId === null ? (
               <EmptyState />
+            ) : activeScan.data === undefined ? (
+              <LoadingScanState
+                id={activeScanId}
+                phase="queued"
+                isRefreshing={activeScan.isFetching || createScan.isPending}
+              />
             ) : !isTerminalScanStatus(activeScan.data.status) ? (
               <LoadingScanState
                 id={activeScan.data.id}
@@ -361,7 +373,10 @@ function LoadingScanState({
   const phaseLine = phaseMessageFor(phase)
 
   return (
-    <article className="rounded-[32px] border border-white/12 bg-white/7 p-8 shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-sm sm:p-10">
+    <article
+      data-testid="loading-screen"
+      className="rounded-[32px] border border-white/12 bg-white/7 p-8 shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-sm sm:p-10"
+    >
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.32em] text-emerald-200/62">
@@ -416,7 +431,7 @@ function Dashboard({
   const totalIssues = scan.accessibility.length + scan.inappropriate.length
 
   return (
-    <div className="grid gap-6">
+    <div data-testid="dashboard" className="grid gap-6">
       <WebsiteSummaryCard
         url={scan.url}
         createdAt={scan.created_at}
@@ -434,6 +449,7 @@ function Dashboard({
           icon={<EyeOff className="size-5" />}
           tone={scoreToneFor(scan.accessibility_score ?? 0, false)}
           max={12}
+          testId="accessibility-score-card"
         />
         <ScoreCard
           title="Inappropriate Score"
@@ -442,6 +458,7 @@ function Dashboard({
           icon={<BadgeAlert className="size-5" />}
           tone={scoreToneFor(scan.inappropriate_score ?? 0, true)}
           max={16}
+          testId="inappropriate-score-card"
         />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
@@ -451,6 +468,7 @@ function Dashboard({
           icon={<ListChecks className="size-5" />}
           findings={scan.accessibility}
           emptyMessage="No accessibility findings were returned for this scan."
+          testId="accessibility-findings"
           renderDetails={(finding) => (
             <div className="mt-4 grid gap-3">
               <FindingDetail
@@ -469,6 +487,7 @@ function Dashboard({
           icon={<ShieldAlert className="size-5" />}
           findings={scan.inappropriate}
           emptyMessage="No inappropriate content findings were returned for this scan."
+          testId="inappropriate-findings"
           renderDetails={(finding) => (
             <div className="mt-4 grid gap-3">
               <FindingDetail
@@ -520,7 +539,10 @@ function WebsiteSummaryCard({
   const riskTone = riskToneFor(riskLevel)
 
   return (
-    <article className="rounded-[32px] border border-white/12 bg-white/7 p-8 shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-sm sm:p-10">
+    <article
+      data-testid="dashboard-summary"
+      className="rounded-[32px] border border-white/12 bg-white/7 p-8 shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-sm sm:p-10"
+    >
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.32em] text-emerald-200/62">
@@ -566,7 +588,10 @@ function WebsiteSummaryCard({
             <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-white/55">
               Risk level
             </p>
-            <div className={`mt-3 inline-flex rounded-full border px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] ${riskTone.badgeClass}`}>
+            <div
+              data-testid="risk-level-badge"
+              className={`mt-3 inline-flex rounded-full border px-3 py-1 font-mono text-xs uppercase tracking-[0.2em] ${riskTone.badgeClass}`}
+            >
               {riskLevel === null ? "Unavailable" : riskLevel}
             </div>
           </div>
@@ -592,6 +617,7 @@ type ScoreCardProps = {
   icon: ReactNode
   tone: ScoreTone
   max: number
+  testId: string
 }
 
 function ScoreCard({
@@ -601,17 +627,24 @@ function ScoreCard({
   icon,
   tone,
   max,
+  testId,
 }: ScoreCardProps) {
   const percentage = Math.min(100, Math.round((value / max) * 100))
 
   return (
-    <article className={`rounded-[28px] border p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm ${tone.panelClass}`}>
+    <article
+      data-testid={testId}
+      className={`rounded-[28px] border p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm ${tone.panelClass}`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.28em] text-white/60">
             {title}
           </p>
-          <p className="mt-4 text-5xl font-semibold tracking-[-0.08em] text-white">
+          <p
+            data-testid={`${testId}-value`}
+            className="mt-4 text-5xl font-semibold tracking-[-0.08em] text-white"
+          >
             {value}
           </p>
         </div>
@@ -643,6 +676,7 @@ type FindingsSectionProps = {
   findings: FindingDto[]
   emptyMessage: string
   renderDetails: (finding: FindingDto) => ReactNode
+  testId: string
 }
 
 function FindingsSection({
@@ -652,9 +686,13 @@ function FindingsSection({
   findings,
   emptyMessage,
   renderDetails,
+  testId,
 }: FindingsSectionProps) {
   return (
-    <section className="rounded-[28px] border border-white/12 bg-white/7 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm">
+    <section
+      data-testid={testId}
+      className="rounded-[28px] border border-white/12 bg-white/7 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm"
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-200/62">
@@ -707,7 +745,10 @@ type CategoryBreakdownCardProps = {
 
 function CategoryBreakdownCard({ breakdown }: CategoryBreakdownCardProps) {
   return (
-    <section className="rounded-[28px] border border-white/12 bg-white/7 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm">
+    <section
+      data-testid="category-breakdown"
+      className="rounded-[28px] border border-white/12 bg-white/7 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm"
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-200/62">
@@ -749,7 +790,10 @@ type RecommendedActionsCardProps = {
 
 function RecommendedActionsCard({ actions }: RecommendedActionsCardProps) {
   return (
-    <section className="rounded-[28px] border border-white/12 bg-white/7 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm">
+    <section
+      data-testid="recommended-actions"
+      className="rounded-[28px] border border-white/12 bg-white/7 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.22)] backdrop-blur-sm"
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.28em] text-emerald-200/62">
