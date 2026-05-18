@@ -5,6 +5,8 @@ use futures_util::StreamExt;
 use serde::de::DeserializeOwned;
 use tokio::{task::JoinHandle, time::timeout};
 
+use crate::axe::{parse_axe_result_value, AXE_SOURCE};
+
 pub const MAX_RESPONSE_BYTES: u64 = 5 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
@@ -119,6 +121,48 @@ impl BrowserSession {
         .map_err(|error| error.with_reason(BrowserSessionErrorReason::TextExtractionFailed))
     }
 
+    pub async fn inject_axe(&self) -> Result<(), BrowserSessionError> {
+        let script = format!(
+            r#"(() => {{
+                {AXE_SOURCE}
+                return !!(window.axe && typeof window.axe.run === "function");
+            }})()"#
+        );
+
+        let loaded = self
+            .evaluate_script::<bool>(&script)
+            .await
+            .map_err(|error| error.with_reason(BrowserSessionErrorReason::AxeInjectionFailed))?;
+
+        if loaded {
+            Ok(())
+        } else {
+            Err(BrowserSessionError::axe_injection_failed(
+                "axe injection completed but window.axe.run was unavailable".to_owned(),
+            ))
+        }
+    }
+
+    pub async fn run_axe(&self) -> Result<Vec<crate::axe::AxeViolation>, BrowserSessionError> {
+        self.inject_axe().await?;
+
+        let raw_result = self
+            .evaluate_script::<serde_json::Value>(
+                r#"(() => {
+                    if (!window.axe || typeof window.axe.run !== "function") {
+                        throw new Error("axe-core is not loaded");
+                    }
+
+                    return window.axe.run(document);
+                })()"#,
+            )
+            .await
+            .map_err(|error| error.with_reason(BrowserSessionErrorReason::AxeScanFailed))?;
+
+        parse_axe_result_value(raw_result)
+            .map_err(|error| BrowserSessionError::axe_result_parse_failed(error.to_string()))
+    }
+
     pub async fn close(mut self) -> Result<(), BrowserSessionError> {
         self.browser
             .close()
@@ -171,6 +215,9 @@ fn ensure_within_size_limit(size: u64) -> Result<(), BrowserSessionError> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserSessionErrorReason {
+    AxeInjectionFailed,
+    AxeResultParseFailed,
+    AxeScanFailed,
     BrowserLaunchFailed,
     BrowserCloseFailed,
     HttpClientBuildFailed,
@@ -185,6 +232,9 @@ pub enum BrowserSessionErrorReason {
 impl BrowserSessionErrorReason {
     pub fn as_error_reason(self) -> &'static str {
         match self {
+            Self::AxeInjectionFailed => "axe_injection_failed",
+            Self::AxeResultParseFailed => "axe_result_parse_failed",
+            Self::AxeScanFailed => "axe_scan_failed",
             Self::BrowserLaunchFailed => "browser_launch_failed",
             Self::BrowserCloseFailed => "browser_close_failed",
             Self::HttpClientBuildFailed => "http_client_build_failed",
@@ -205,6 +255,17 @@ pub struct BrowserSessionError {
 }
 
 impl BrowserSessionError {
+    fn axe_injection_failed(message: String) -> Self {
+        Self::new(BrowserSessionErrorReason::AxeInjectionFailed, message)
+    }
+
+    fn axe_result_parse_failed(message: String) -> Self {
+        Self::new(
+            BrowserSessionErrorReason::AxeResultParseFailed,
+            format!("failed to parse axe-core result: {message}"),
+        )
+    }
+
     fn browser_close(source: chromiumoxide::error::CdpError) -> Self {
         Self::new(
             BrowserSessionErrorReason::BrowserCloseFailed,
@@ -335,5 +396,9 @@ mod tests {
         assert_eq!(timeout.error_reason(), "navigation_timeout");
         assert_eq!(launch.error_reason(), "browser_launch_failed");
         assert_eq!(extract.error_reason(), "text_extraction_failed");
+        assert_eq!(
+            BrowserSessionErrorReason::AxeInjectionFailed.as_error_reason(),
+            "axe_injection_failed"
+        );
     }
 }
