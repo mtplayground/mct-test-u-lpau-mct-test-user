@@ -64,9 +64,11 @@ pub enum ScanStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ScanPhase {
     Queued,
+    Loading,
     Fetching,
     Accessibility,
     ContentSafety,
+    Aggregating,
     Persisting,
     Completed,
     Failed,
@@ -150,9 +152,11 @@ impl_text_enum!(ScanStatus {
 
 impl_text_enum!(ScanPhase {
     Queued => "queued",
+    Loading => "loading",
     Fetching => "fetching",
     Accessibility => "accessibility",
     ContentSafety => "content_safety",
+    Aggregating => "aggregating",
     Persisting => "persisting",
     Completed => "completed",
     Failed => "failed",

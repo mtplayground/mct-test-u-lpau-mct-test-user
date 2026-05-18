@@ -1,0 +1,16 @@
+[package]
+name = "zeroclaw-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+time.workspace = true
+zeroclaw-ai = { path = "../ai" }
+zeroclaw-browser = { path = "../browser" }
+zeroclaw-core = { path = "../core" }
+zeroclaw-storage = { path = "../storage" }
+
+[dev-dependencies]
+tokio.workspace = true
