@@ -11,8 +11,8 @@ use zeroclaw_browser::{
     BrowserSessionError, BrowserSessionErrorReason,
 };
 use zeroclaw_core::{
-    aggregate_findings, validate_scan_url, NewFinding, RiskLevel, Scan, ScanPhase, ScanScoreUpdate,
-    ScanStatus, ScanStatusUpdate, UrlValidationError,
+    aggregate_findings, compute_risk_level, validate_scan_url, NewFinding, RiskLevel, Scan,
+    ScanPhase, ScanScoreUpdate, ScanStatus, ScanStatusUpdate, UrlValidationError,
 };
 use zeroclaw_storage::{Repository, RepositoryError};
 
@@ -39,6 +39,7 @@ pub struct ScanRunOutput {
     pub category_breakdown: std::collections::BTreeMap<zeroclaw_core::Category, usize>,
     pub recommendations_text: String,
     pub content_safety_summary: String,
+    pub content_safety_skipped: bool,
 }
 
 pub struct ScanWorker<S, P, C> {
@@ -114,16 +115,57 @@ where
             ));
         }
 
-        self.update_phase(scan_id, ScanPhase::ContentSafety).await?;
         let Some(content_safety_client) = self.content_safety_client.as_ref() else {
-            let failure = ScanFailureReason::Blocked;
-            self.mark_failed(scan_id, failure).await?;
-            return Err(ScanWorkerError::pipeline(
-                failure,
-                "content safety client is not configured".to_owned(),
-            ));
+            let content_safety_findings = Vec::new();
+            let mut aggregated =
+                aggregate_findings(&accessibility_findings, &content_safety_findings);
+            aggregated.risk_level = compute_risk_level(aggregated.accessibility_score as usize);
+
+            self.update_phase(scan_id, ScanPhase::Aggregating).await?;
+            self.store
+                .insert_findings_batch(scan_id, &accessibility_findings)
+                .await
+                .map_err(ScanWorkerError::store)?;
+            self.store
+                .update_scan_scores(
+                    scan_id,
+                    &ScanScoreUpdate {
+                        accessibility_score: Some(aggregated.accessibility_score),
+                        inappropriate_score: Some(0),
+                        risk_level: Some(aggregated.risk_level),
+                        content_safety_skipped: true,
+                    },
+                )
+                .await
+                .map_err(ScanWorkerError::store)?
+                .ok_or(ScanWorkerError::scan_not_found(scan_id))?;
+            self.store
+                .update_scan_status(
+                    scan_id,
+                    &ScanStatusUpdate {
+                        status: ScanStatus::Completed,
+                        phase: ScanPhase::Completed,
+                        error_reason: None,
+                    },
+                )
+                .await
+                .map_err(ScanWorkerError::store)?
+                .ok_or(ScanWorkerError::scan_not_found(scan_id))?;
+
+            return Ok(ScanRunOutput {
+                accessibility_findings,
+                accessibility_score: aggregated.accessibility_score,
+                content_safety_findings,
+                inappropriate_score: 0,
+                risk_level: aggregated.risk_level,
+                category_breakdown: aggregated.category_breakdown,
+                recommendations_text: aggregated.recommendations_text,
+                content_safety_summary: String::new(),
+                content_safety_skipped: true,
+            });
         };
 
+        self.update_phase(scan_id, ScanPhase::ContentSafety).await?;
         let raw_response = match content_safety_client
             .classify_extracted_text(&page_analysis.visible_text)
             .await
@@ -164,6 +206,7 @@ where
                     accessibility_score: Some(aggregated.accessibility_score),
                     inappropriate_score: Some(aggregated.inappropriate_score),
                     risk_level: Some(aggregated.risk_level),
+                    content_safety_skipped: false,
                 },
             )
             .await
@@ -191,6 +234,7 @@ where
             category_breakdown: aggregated.category_breakdown,
             recommendations_text: aggregated.recommendations_text,
             content_safety_summary: parsed.summary,
+            content_safety_skipped: false,
         })
     }
 
@@ -501,10 +545,11 @@ mod tests {
             .recommendations_text
             .contains("Resolve accessibility violations first"));
         assert_eq!(output.content_safety_summary, "Safe enough");
+        assert!(!output.content_safety_skipped);
         assert_eq!(store.inserted_findings_len(), 1);
         assert_eq!(
             store.score_updates(),
-            vec![(Some(1), Some(0), Some(RiskLevel::Low))]
+            vec![(Some(1), Some(0), Some(RiskLevel::Low), false)]
         );
 
         let updates = store.status_updates();
@@ -641,6 +686,7 @@ mod tests {
             accessibility_score: None,
             inappropriate_score: None,
             risk_level: None,
+            content_safety_skipped: false,
             error_reason: None,
             created_at: time::OffsetDateTime::UNIX_EPOCH,
             updated_at: time::OffsetDateTime::UNIX_EPOCH,
@@ -671,7 +717,7 @@ mod tests {
         scan: Mutex<Option<Scan>>,
         updates: Mutex<Vec<(ScanStatus, ScanPhase, Option<String>)>>,
         inserted_findings: Mutex<Vec<NewFinding>>,
-        score_updates: Mutex<Vec<(Option<i32>, Option<i32>, Option<RiskLevel>)>>,
+        score_updates: Mutex<Vec<(Option<i32>, Option<i32>, Option<RiskLevel>, bool)>>,
     }
 
     impl FakeStore {
@@ -695,7 +741,7 @@ mod tests {
                 .len()
         }
 
-        fn score_updates(&self) -> Vec<(Option<i32>, Option<i32>, Option<RiskLevel>)> {
+        fn score_updates(&self) -> Vec<(Option<i32>, Option<i32>, Option<RiskLevel>, bool)> {
             self.score_updates
                 .lock()
                 .expect("score updates lock poisoned")
@@ -750,6 +796,7 @@ mod tests {
                     update.accessibility_score,
                     update.inappropriate_score,
                     update.risk_level,
+                    update.content_safety_skipped,
                 ));
 
             let mut guard = self.scan.lock().expect("scan lock poisoned");
@@ -757,6 +804,7 @@ mod tests {
                 scan.accessibility_score = update.accessibility_score;
                 scan.inappropriate_score = update.inappropriate_score;
                 scan.risk_level = update.risk_level;
+                scan.content_safety_skipped = update.content_safety_skipped;
             }
 
             Ok(guard.clone())

@@ -12,6 +12,7 @@ pub struct Scan {
     pub accessibility_score: Option<i32>,
     pub inappropriate_score: Option<i32>,
     pub risk_level: Option<RiskLevel>,
+    pub content_safety_skipped: bool,
     pub error_reason: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -37,6 +38,7 @@ pub struct ScanScoreUpdate {
     pub accessibility_score: Option<i32>,
     pub inappropriate_score: Option<i32>,
     pub risk_level: Option<RiskLevel>,
+    pub content_safety_skipped: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
