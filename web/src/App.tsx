@@ -32,6 +32,8 @@ import {
 const URL_PLACEHOLDER =
   "Enter a website URL, for example: https://example.com"
 const INVALID_URL_MESSAGE = "Please enter a valid website URL."
+const CONTENT_SAFETY_NOT_EVALUATED_MESSAGE =
+  "Not evaluated — set `ANTHROPIC_API_KEY` to enable"
 
 function App() {
   const [url, setUrl] = useState("")
@@ -432,6 +434,7 @@ function Dashboard({
   onRescan,
 }: DashboardProps) {
   const totalIssues = scan.accessibility.length + scan.inappropriate.length
+  const contentSafetySkipped = scan.content_safety_skipped
 
   return (
     <div data-testid="dashboard" className="grid gap-5 xl:gap-6">
@@ -456,12 +459,28 @@ function Dashboard({
         />
         <ScoreCard
           title="Inappropriate Score"
-          value={scan.inappropriate_score ?? 0}
-          explanation="Weighted score based on inappropriate or unsafe content findings."
+          value={contentSafetySkipped ? null : (scan.inappropriate_score ?? 0)}
+          valueLabel={contentSafetySkipped ? "Not evaluated" : undefined}
+          unitLabel={contentSafetySkipped ? "" : "issues"}
+          explanation={
+            contentSafetySkipped
+              ? "Content safety was not evaluated for this scan."
+              : "Weighted score based on inappropriate or unsafe content findings."
+          }
+          note={
+            contentSafetySkipped
+              ? CONTENT_SAFETY_NOT_EVALUATED_MESSAGE
+              : undefined
+          }
           icon={<BadgeAlert className="size-5" />}
-          tone={scoreToneFor(scan.inappropriate_score ?? 0, true)}
+          tone={
+            contentSafetySkipped
+              ? mutedScoreTone()
+              : scoreToneFor(scan.inappropriate_score ?? 0, true)
+          }
           max={16}
           testId="inappropriate-score-card"
+          showMeter={!contentSafetySkipped}
         />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
@@ -488,8 +507,13 @@ function Dashboard({
           title="Inappropriate Content Findings"
           description="Unsafe or sensitive content findings with their category, excerpt, and recommended action."
           icon={<ShieldAlert className="size-5" />}
-          findings={scan.inappropriate}
-          emptyMessage="No inappropriate content findings were returned for this scan."
+          findings={contentSafetySkipped ? [] : scan.inappropriate}
+          emptyMessage={
+            contentSafetySkipped
+              ? CONTENT_SAFETY_NOT_EVALUATED_MESSAGE
+              : "No inappropriate content findings were returned for this scan."
+          }
+          emptyVariant={contentSafetySkipped ? "info" : "default"}
           testId="inappropriate-findings"
           renderDetails={(finding) => (
             <div className="mt-4 grid gap-3">
@@ -516,7 +540,10 @@ function Dashboard({
         />
       </div>
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-        <CategoryBreakdownCard breakdown={scan.category_breakdown ?? []} />
+        <CategoryBreakdownCard
+          breakdown={scan.category_breakdown ?? []}
+          contentSafetySkipped={contentSafetySkipped}
+        />
         <RecommendedActionsCard actions={scan.recommended_actions ?? []} />
       </div>
     </div>
@@ -627,24 +654,33 @@ function WebsiteSummaryCard({
 
 type ScoreCardProps = {
   title: string
-  value: number
+  value: number | null
+  valueLabel?: string
+  unitLabel?: string
   explanation: string
+  note?: string
   icon: ReactNode
   tone: ScoreTone
   max: number
   testId: string
+  showMeter?: boolean
 }
 
 function ScoreCard({
   title,
   value,
+  valueLabel,
+  unitLabel = "issues",
   explanation,
+  note,
   icon,
   tone,
   max,
   testId,
+  showMeter = true,
 }: ScoreCardProps) {
-  const percentage = Math.min(100, Math.round((value / max) * 100))
+  const percentage =
+    value === null ? 0 : Math.min(100, Math.round((value / max) * 100))
 
   return (
     <article
@@ -659,13 +695,19 @@ function ScoreCard({
           <div className="flex items-end gap-3">
             <p
               data-testid={`${testId}-value`}
-              className="text-5xl font-semibold tracking-[-0.09em] text-slate-950"
+              className={
+                valueLabel === undefined
+                  ? "text-5xl font-semibold tracking-[-0.09em] text-slate-950"
+                  : "max-w-[12rem] text-3xl font-semibold leading-none tracking-[-0.07em] text-slate-950"
+              }
             >
-              {value}
+              {valueLabel ?? value}
             </p>
-            <span className="pb-1 font-mono text-[11px] uppercase tracking-[0.22em] text-slate-900/42">
-              issues
-            </span>
+            {unitLabel.length > 0 ? (
+              <span className="pb-1 font-mono text-[11px] uppercase tracking-[0.22em] text-slate-900/42">
+                {unitLabel}
+              </span>
+            ) : null}
           </div>
         </div>
         <div className={`rounded-[20px] border p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] ${tone.iconClass}`}>
@@ -674,19 +716,26 @@ function ScoreCard({
       </div>
 
       <p className="mt-4 text-sm leading-6 text-slate-700">{explanation}</p>
+      {note === undefined ? null : (
+        <p className="mt-3 rounded-2xl border border-slate-900/8 bg-white/60 px-4 py-3 text-sm leading-6 text-slate-600">
+          {note}
+        </p>
+      )}
 
-      <div className="mt-6">
-        <div className="mb-2.5 flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.24em] text-slate-900/45">
-          <span>Relative severity</span>
-          <span>{percentage}%</span>
+      {showMeter ? (
+        <div className="mt-6">
+          <div className="mb-2.5 flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.24em] text-slate-900/45">
+            <span>Relative severity</span>
+            <span>{percentage}%</span>
+          </div>
+          <div className="h-3 overflow-hidden rounded-full bg-slate-900/8">
+            <div
+              className={`h-full rounded-full transition-[width] duration-500 ${tone.barClass}`}
+              style={{ width: `${Math.max(8, percentage)}%` }}
+            />
+          </div>
         </div>
-        <div className="h-3 overflow-hidden rounded-full bg-slate-900/8">
-          <div
-            className={`h-full rounded-full transition-[width] duration-500 ${tone.barClass}`}
-            style={{ width: `${Math.max(8, percentage)}%` }}
-          />
-        </div>
-      </div>
+      ) : null}
     </article>
   )
 }
@@ -697,6 +746,7 @@ type FindingsSectionProps = {
   icon: ReactNode
   findings: FindingDto[]
   emptyMessage: string
+  emptyVariant?: "default" | "info"
   renderDetails: (finding: FindingDto) => ReactNode
   testId: string
 }
@@ -707,6 +757,7 @@ function FindingsSection({
   icon,
   findings,
   emptyMessage,
+  emptyVariant = "default",
   renderDetails,
   testId,
 }: FindingsSectionProps) {
@@ -730,7 +781,13 @@ function FindingsSection({
       </div>
 
       {findings.length === 0 ? (
-        <div className="mt-6 rounded-[24px] border border-dashed border-slate-900/10 bg-slate-50/70 p-5 text-sm leading-6 text-slate-600">
+        <div
+          className={`mt-6 rounded-[24px] border border-dashed p-5 text-sm leading-6 ${
+            emptyVariant === "info"
+              ? "border-slate-900/12 bg-slate-100/70 text-slate-600"
+              : "border-slate-900/10 bg-slate-50/70 text-slate-600"
+          }`}
+        >
           {emptyMessage}
         </div>
       ) : (
@@ -763,9 +820,13 @@ function FindingsSection({
 
 type CategoryBreakdownCardProps = {
   breakdown: CategoryBreakdownItem[]
+  contentSafetySkipped: boolean
 }
 
-function CategoryBreakdownCard({ breakdown }: CategoryBreakdownCardProps) {
+function CategoryBreakdownCard({
+  breakdown,
+  contentSafetySkipped,
+}: CategoryBreakdownCardProps) {
   return (
     <section
       data-testid="category-breakdown"
@@ -786,23 +847,31 @@ function CategoryBreakdownCard({ breakdown }: CategoryBreakdownCardProps) {
         </div>
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-[24px] border border-slate-900/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(244,248,247,0.95)_100%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]">
-        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-900/8 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.24em] text-slate-900/48">
-          <span>Category</span>
-          <span>Count</span>
+      {contentSafetySkipped ? (
+        <div className="mt-6 rounded-[24px] border border-dashed border-slate-900/12 bg-slate-100/70 p-5 text-sm leading-6 text-slate-600">
+          {CONTENT_SAFETY_NOT_EVALUATED_MESSAGE}
         </div>
-        <div className="divide-y divide-slate-900/6">
-          {breakdown.map((item) => (
-            <div
-              key={item.category}
-              className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3.5 text-sm text-slate-700"
-            >
-              <span>{formatEnumLabel(item.category)}</span>
-              <span className="font-mono text-emerald-950/78">{item.count}</span>
-            </div>
-          ))}
+      ) : (
+        <div className="mt-6 overflow-hidden rounded-[24px] border border-slate-900/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(244,248,247,0.95)_100%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]">
+          <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-900/8 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.24em] text-slate-900/48">
+            <span>Category</span>
+            <span>Count</span>
+          </div>
+          <div className="divide-y divide-slate-900/6">
+            {breakdown.map((item) => (
+              <div
+                key={item.category}
+                className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3.5 text-sm text-slate-700"
+              >
+                <span>{formatEnumLabel(item.category)}</span>
+                <span className="font-mono text-emerald-950/78">
+                  {item.count}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </section>
   )
 }
@@ -1034,6 +1103,15 @@ function scoreToneFor(value: number, weighted: boolean): ScoreTone {
       "border-emerald-300/40 bg-[linear-gradient(180deg,rgba(236,253,245,0.94)_0%,rgba(209,250,229,0.88)_100%)]",
     iconClass: "border-emerald-700/10 bg-emerald-100 text-emerald-700",
     barClass: "bg-emerald-600",
+  }
+}
+
+function mutedScoreTone(): ScoreTone {
+  return {
+    panelClass:
+      "border-slate-300/45 bg-[linear-gradient(180deg,rgba(248,250,252,0.94)_0%,rgba(226,232,240,0.84)_100%)]",
+    iconClass: "border-slate-700/10 bg-slate-100 text-slate-600",
+    barClass: "bg-slate-400",
   }
 }
 
