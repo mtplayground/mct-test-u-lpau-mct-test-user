@@ -8,7 +8,7 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct Config {
     pub database_url: String,
-    pub anthropic_api_key: String,
+    pub anthropic_api_key: Option<String>,
     pub chromium_path: PathBuf,
     pub scan_timeout: Duration,
     pub port: u16,
@@ -19,7 +19,7 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
         let database_url = required_var("DATABASE_URL")?;
-        let anthropic_api_key = required_var("ANTHROPIC_API_KEY")?;
+        let anthropic_api_key = optional_var("ANTHROPIC_API_KEY")?;
         let chromium_path = PathBuf::from(required_var("CHROMIUM_PATH")?);
         let scan_timeout_secs = parse_u64_var("SCAN_TIMEOUT_SECS")?;
         let port = parse_u16_var("PORT")?;
