@@ -44,7 +44,7 @@ pub struct ScanRunOutput {
 pub struct ScanWorker<S, P, C> {
     store: Arc<S>,
     page_analyzer: Arc<P>,
-    content_safety_client: Arc<C>,
+    content_safety_client: Option<Arc<C>>,
     config: WorkerConfig,
 }
 
@@ -52,7 +52,7 @@ impl<S, P, C> ScanWorker<S, P, C> {
     pub fn new(
         store: Arc<S>,
         page_analyzer: Arc<P>,
-        content_safety_client: Arc<C>,
+        content_safety_client: Option<Arc<C>>,
         config: WorkerConfig,
     ) -> Self {
         Self {
@@ -115,8 +115,16 @@ where
         }
 
         self.update_phase(scan_id, ScanPhase::ContentSafety).await?;
-        let raw_response = match self
-            .content_safety_client
+        let Some(content_safety_client) = self.content_safety_client.as_ref() else {
+            let failure = ScanFailureReason::Blocked;
+            self.mark_failed(scan_id, failure).await?;
+            return Err(ScanWorkerError::pipeline(
+                failure,
+                "content safety client is not configured".to_owned(),
+            ));
+        };
+
+        let raw_response = match content_safety_client
             .classify_extracted_text(&page_analysis.visible_text)
             .await
         {
@@ -475,9 +483,9 @@ mod tests {
                 accessibility_violations: vec![sample_violation()],
                 visible_text: "Visible content".to_owned(),
             })),
-            Arc::new(FakeContentSafetyClient::success(
+            Some(Arc::new(FakeContentSafetyClient::success(
                 r#"{"summary":"Safe enough","findings":[]}"#.to_owned(),
-            )),
+            ))),
             sample_config(),
         );
 
@@ -518,9 +526,9 @@ mod tests {
         let worker = ScanWorker::new(
             store.clone(),
             Arc::new(FakePageAnalyzer::unreachable()),
-            Arc::new(FakeContentSafetyClient::success(
+            Some(Arc::new(FakeContentSafetyClient::success(
                 r#"{"summary":"unused","findings":[]}"#.to_owned(),
-            )),
+            ))),
             sample_config(),
         );
 
@@ -546,9 +554,9 @@ mod tests {
         let worker = ScanWorker::new(
             store.clone(),
             Arc::new(FakePageAnalyzer::timeout()),
-            Arc::new(FakeContentSafetyClient::success(
+            Some(Arc::new(FakeContentSafetyClient::success(
                 r#"{"summary":"unused","findings":[]}"#.to_owned(),
-            )),
+            ))),
             sample_config(),
         );
 
@@ -580,9 +588,9 @@ mod tests {
                 accessibility_violations: vec![],
                 visible_text: " \n\t ".to_owned(),
             })),
-            Arc::new(FakeContentSafetyClient::success(
+            Some(Arc::new(FakeContentSafetyClient::success(
                 r#"{"summary":"unused","findings":[]}"#.to_owned(),
-            )),
+            ))),
             sample_config(),
         );
 

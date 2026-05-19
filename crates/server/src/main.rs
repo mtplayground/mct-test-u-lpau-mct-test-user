@@ -402,29 +402,33 @@ fn build_worker_dispatcher(
     match config.e2e_fixture_url.as_deref() {
         Some(fixture_url) => Arc::new(SpawnedScanWorkerDispatcher::new(
             Arc::new(E2eFixturePageAnalyzer::new(fixture_url.to_owned())),
-            Arc::new(StaticContentSafetyClient::default()),
+            Some(Arc::new(StaticContentSafetyClient::default())),
             worker_config,
         )),
-        None => Arc::new(SpawnedScanWorkerDispatcher::new(
-            Arc::new(ChromiumPageAnalyzer),
-            Arc::new(AnthropicClient::new(AnthropicClientConfig::new(
-                config.anthropic_api_key.clone().unwrap_or_default(),
-            ))),
-            worker_config,
-        )),
+        None => {
+            let content_safety_client = config.anthropic_api_key.as_ref().map(|api_key| {
+                Arc::new(AnthropicClient::new(AnthropicClientConfig::new(api_key.clone())))
+            });
+
+            Arc::new(SpawnedScanWorkerDispatcher::new(
+                Arc::new(ChromiumPageAnalyzer),
+                content_safety_client,
+                worker_config,
+            ))
+        }
     }
 }
 
 struct SpawnedScanWorkerDispatcher<P, C> {
     page_analyzer: Arc<P>,
-    content_safety_client: Arc<C>,
+    content_safety_client: Option<Arc<C>>,
     worker_config: WorkerConfig,
 }
 
 impl<P, C> SpawnedScanWorkerDispatcher<P, C> {
     fn new(
         page_analyzer: Arc<P>,
-        content_safety_client: Arc<C>,
+        content_safety_client: Option<Arc<C>>,
         worker_config: WorkerConfig,
     ) -> Self {
         Self {
@@ -679,7 +683,7 @@ mod tests {
         let fixture = FixtureHtmlServer::spawn().await?;
         let worker_dispatcher = Arc::new(SpawnedScanWorkerDispatcher::new(
             Arc::new(FixturePageAnalyzer::new(fixture.base_url.clone())),
-            Arc::new(StaticContentSafetyClient::new(
+            Some(Arc::new(StaticContentSafetyClient::new(
                 r#"{
                     "summary":"Fixture page contains weapon marketing content.",
                     "findings":[
@@ -694,7 +698,7 @@ mod tests {
                         }
                     ]
                 }"#,
-            )),
+            ))),
             WorkerConfig {
                 chromium_path: PathBuf::from("/usr/bin/chromium"),
                 scan_timeout: std::time::Duration::from_secs(30),
