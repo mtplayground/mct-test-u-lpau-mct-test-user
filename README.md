@@ -11,7 +11,8 @@ Anthropic Messages API.
 - Node.js and npm
 - PostgreSQL 16+ reachable through `DATABASE_URL`
 - A Chromium-compatible browser binary installed on the host
-- An Anthropic API key with access to the Messages API
+- Optional: an Anthropic API key with access to the Messages API for
+  content-safety classification
 
 Typical Linux Chromium paths:
 
@@ -26,10 +27,17 @@ The server fails fast on missing required environment variables.
 Required:
 
 - `DATABASE_URL`: PostgreSQL connection string
-- `ANTHROPIC_API_KEY`: API key used for content-safety classification
 - `CHROMIUM_PATH`: absolute path to the Chromium binary
 - `SCAN_TIMEOUT_SECS`: timeout budget for page scanning work
 - `PORT`: HTTP port bound by the Axum server on `0.0.0.0:$PORT`
+
+Optional:
+
+- `ANTHROPIC_API_KEY`: optional API key used for content-safety
+  classification. When unset or empty, content safety is skipped,
+  `inappropriateScore` is always `0`, and the dashboard shows
+  "Not evaluated — set `ANTHROPIC_API_KEY` to enable" for the inappropriate
+  score, inappropriate findings, and content analysis breakdown.
 
 Example local config:
 
@@ -41,7 +49,7 @@ cp .env.example .env
 
 ```bash
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/zeroclaw
-ANTHROPIC_API_KEY=sk-ant-example
+ANTHROPIC_API_KEY=sk-ant-example # optional; omit or leave empty to skip content safety
 CHROMIUM_PATH=/usr/bin/chromium
 SCAN_TIMEOUT_SECS=60
 PORT=8080
@@ -92,7 +100,7 @@ sqlx migrate run
 ```bash
 cd /workspace
 export DATABASE_URL=postgres://postgres:postgres@localhost:5432/zeroclaw
-export ANTHROPIC_API_KEY=sk-ant-example
+export ANTHROPIC_API_KEY=sk-ant-example # optional; omit to skip content safety
 export CHROMIUM_PATH=/usr/bin/chromium
 export SCAN_TIMEOUT_SECS=60
 export PORT=8080
