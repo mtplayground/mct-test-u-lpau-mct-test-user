@@ -566,6 +566,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn run_scan_skips_content_safety_when_client_is_absent() {
+        let store = Arc::new(FakeStore::with_scan(sample_scan("https://example.com")));
+        let worker = ScanWorker::<FakeStore, FakePageAnalyzer, FakeContentSafetyClient>::new(
+            store.clone(),
+            Arc::new(FakePageAnalyzer::success(PageAnalysis {
+                accessibility_violations: vec![
+                    sample_violation(),
+                    sample_violation(),
+                    sample_violation(),
+                ],
+                visible_text: "Visible content".to_owned(),
+            })),
+            None,
+            sample_config(),
+        );
+
+        let output = worker.run_scan(7).await.expect("worker should succeed");
+
+        assert_eq!(output.accessibility_score, 3);
+        assert_eq!(output.accessibility_findings.len(), 3);
+        assert!(output.content_safety_findings.is_empty());
+        assert_eq!(output.inappropriate_score, 0);
+        assert_eq!(output.risk_level, RiskLevel::Medium);
+        assert!(output.content_safety_skipped);
+        assert_eq!(output.content_safety_summary, "");
+        assert_eq!(store.inserted_findings_len(), 3);
+        assert_eq!(
+            store.score_updates(),
+            vec![(Some(3), Some(0), Some(RiskLevel::Medium), true)]
+        );
+
+        let updates = store.status_updates();
+        assert_eq!(
+            updates,
+            vec![
+                (ScanStatus::Running, ScanPhase::Loading, None),
+                (ScanStatus::Running, ScanPhase::Accessibility, None),
+                (ScanStatus::Running, ScanPhase::Aggregating, None),
+                (ScanStatus::Completed, ScanPhase::Completed, None),
+            ]
+        );
+        assert!(
+            updates
+                .iter()
+                .all(|(_, phase, _)| *phase != ScanPhase::ContentSafety),
+            "content safety phase should be skipped when no client is configured"
+        );
+    }
+
+    #[tokio::test]
     async fn run_scan_marks_invalid_url_as_failed() {
         let store = Arc::new(FakeStore::with_scan(sample_scan("not-a-url")));
         let worker = ScanWorker::new(
