@@ -1,0 +1,2 @@
+ALTER TABLE scans
+ADD COLUMN content_safety_skipped BOOLEAN NOT NULL DEFAULT FALSE;

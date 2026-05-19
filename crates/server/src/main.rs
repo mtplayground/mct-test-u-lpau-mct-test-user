@@ -838,6 +838,7 @@ mod tests {
             accessibility_score: Some(2),
             inappropriate_score: Some(4),
             risk_level: Some(RiskLevel::Medium),
+            content_safety_skipped: false,
             error_reason: None,
             created_at: OffsetDateTime::UNIX_EPOCH,
             updated_at: OffsetDateTime::UNIX_EPOCH,

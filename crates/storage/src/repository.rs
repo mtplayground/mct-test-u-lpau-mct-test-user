@@ -30,6 +30,7 @@ impl Repository {
                 accessibility_score,
                 inappropriate_score,
                 risk_level,
+                content_safety_skipped,
                 error_reason,
                 created_at,
                 updated_at
@@ -69,6 +70,7 @@ impl Repository {
                 accessibility_score,
                 inappropriate_score,
                 risk_level,
+                content_safety_skipped,
                 error_reason,
                 created_at,
                 updated_at
@@ -98,6 +100,7 @@ impl Repository {
                 accessibility_score = $2,
                 inappropriate_score = $3,
                 risk_level = $4,
+                content_safety_skipped = $5,
                 updated_at = NOW()
             WHERE id = $1
             RETURNING
@@ -109,6 +112,7 @@ impl Repository {
                 accessibility_score,
                 inappropriate_score,
                 risk_level,
+                content_safety_skipped,
                 error_reason,
                 created_at,
                 updated_at
@@ -118,6 +122,7 @@ impl Repository {
         .bind(update.accessibility_score)
         .bind(update.inappropriate_score)
         .bind(risk_level)
+        .bind(update.content_safety_skipped)
         .fetch_optional(&self.pool)
         .await
         .map_err(RepositoryError::Sqlx)?;
@@ -137,6 +142,7 @@ impl Repository {
                 accessibility_score,
                 inappropriate_score,
                 risk_level,
+                content_safety_skipped,
                 error_reason,
                 created_at,
                 updated_at
@@ -167,6 +173,7 @@ impl Repository {
                 accessibility_score,
                 inappropriate_score,
                 risk_level,
+                content_safety_skipped,
                 error_reason,
                 created_at,
                 updated_at
@@ -315,6 +322,9 @@ fn map_scan_row(row: PgRow) -> Result<Scan, RepositoryError> {
             .try_get("inappropriate_score")
             .map_err(RepositoryError::Sqlx)?,
         risk_level: parse_optional_enum_field("risk_level", &row)?,
+        content_safety_skipped: row
+            .try_get("content_safety_skipped")
+            .map_err(RepositoryError::Sqlx)?,
         error_reason: row.try_get("error_reason").map_err(RepositoryError::Sqlx)?,
         created_at: row.try_get("created_at").map_err(RepositoryError::Sqlx)?,
         updated_at: row.try_get("updated_at").map_err(RepositoryError::Sqlx)?,

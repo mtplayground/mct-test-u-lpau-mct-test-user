@@ -50,6 +50,7 @@ async fn repository_persists_scans_and_findings() -> Result<(), Box<dyn Error>> 
     assert_eq!(queued_scan.status, ScanStatus::Pending);
     assert_eq!(queued_scan.phase, ScanPhase::Queued);
     assert_eq!(queued_scan.accessibility_score, None);
+    assert!(!queued_scan.content_safety_skipped);
 
     let updated_scan = repo
         .update_scan_status(
@@ -73,6 +74,7 @@ async fn repository_persists_scans_and_findings() -> Result<(), Box<dyn Error>> 
                 accessibility_score: Some(4),
                 inappropriate_score: Some(7),
                 risk_level: Some(RiskLevel::High),
+                content_safety_skipped: true,
             },
         )
         .await?
@@ -81,6 +83,7 @@ async fn repository_persists_scans_and_findings() -> Result<(), Box<dyn Error>> 
     assert_eq!(scored_scan.accessibility_score, Some(4));
     assert_eq!(scored_scan.inappropriate_score, Some(7));
     assert_eq!(scored_scan.risk_level, Some(RiskLevel::High));
+    assert!(scored_scan.content_safety_skipped);
 
     let completed_scan = repo
         .update_scan_status(
