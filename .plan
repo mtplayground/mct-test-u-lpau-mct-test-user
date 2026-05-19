@@ -1,123 +1,82 @@
-ZeroClaw architecture plan
+ZeroClaw architecture plan for issues #63-#69
 
 Goal
-Build a single Rust service that exposes the scan API, runs asynchronous analysis jobs, persists results in Postgres, and serves a React SPA dashboard from the same deployable binary.
+Make `ANTHROPIC_API_KEY` optional without weakening the rest of the scan
+pipeline. When the key is absent, scans should still run accessibility analysis,
+persist completed results, expose that content safety was skipped, and make the
+frontend clearly label the inappropriate-content score as not evaluated.
 
-Repository layout
-
-.
-├── Cargo.toml
-├── Cargo.lock
-├── crates/
-│   ├── server/           # Axum app entrypoint, routing, HTTP state, static SPA serving
-│   ├── core/             # Domain models, enums, scoring, validation, shared business logic
-│   ├── storage/          # sqlx repositories, migrations bootstrap, persistence DTO mapping
-│   ├── worker/           # Browser runner, axe integration, Anthropic integration, job pipeline
-│   └── api-types/        # Shared request/response types serialized for backend + frontend
-├── migrations/           # sqlx migrations
-├── web/
-│   ├── src/
-│   │   ├── app/
-│   │   ├── components/
-│   │   ├── features/scans/
-│   │   ├── lib/
-│   │   └── types/        # Generated/re-exported shared API types if needed
-│   ├── public/
-│   └── dist/             # Build artifact only, not committed
-├── tests/
-│   ├── api/
-│   └── e2e/
-└── README.md
-
-Workspace structure
-- `crates/server`: depends on `core`, `storage`, `worker`, and `api-types`. Owns Axum router, app state, config loading, startup, and SPA fallback/static serving.
-- `crates/core`: pure domain layer. Defines `Scan`, `Finding`, scan phases/status, severity/category enums, score aggregation, URL validation interfaces, and mapper contracts.
-- `crates/storage`: wraps `sqlx::PgPool`, migrations startup, and repositories for scans/findings. Depends on `core` and `api-types` only for mapping boundaries.
-- `crates/worker`: orchestrates scan execution phases. Contains browser capture, axe runner, content-safety client, result normalization, and persistence callbacks. Depends on `core`, `storage`, and `api-types`.
-- `crates/api-types`: serde-only shared DTOs for `POST /api/scans`, `GET /api/scans/:id`, progress payloads, summary cards, and findings lists. Keep this crate free of Axum/sqlx/browser/client dependencies.
-- `web/`: React + Vite + Tailwind + shadcn/ui SPA. Uses a typed API client generated manually from `api-types` contracts or mirrored with a thin TS type layer.
-
-Backend module organization
-- `server/src/main.rs`: startup, tracing, config bootstrap.
-- `server/src/config.rs`: environment parsing, validated settings, feature flags.
-- `server/src/app_state.rs`: shared application state with pool, repositories, and worker dispatcher.
-- `server/src/routes/mod.rs`: route registration.
-- `server/src/routes/scans.rs`: `POST /api/scans` and `GET /api/scans/:id`.
-- `server/src/spa.rs`: serve `web/dist` assets and SPA fallback.
-- `core/src/models.rs`: scan and finding aggregates.
-- `core/src/enums.rs`: phases, severities, content/accessibility categories.
-- `core/src/scoring.rs`: score rules and aggregation.
-- `core/src/validation.rs`: URL validation plus SSRF-safe normalization.
-- `storage/src/db.rs`: pool and migration runner.
-- `storage/src/repositories/scans.rs`: insert/update/read scans and findings.
-- `worker/src/pipeline.rs`: phase transitions and orchestration.
-- `worker/src/browser.rs`: Chromium wrapper, timeout, page-size/network guards.
-- `worker/src/accessibility.rs`: axe-core injection, parsing, mapping.
-- `worker/src/content_safety.rs`: Anthropic client, structured parser, mapping.
-- `worker/src/aggregation.rs`: combine partial results into persisted summary/output.
-
-Frontend organization
-- `web/src/app/router.tsx` or single-page composition if routing is unnecessary.
-- `web/src/features/scans/api.ts`: fetch wrapper and scan polling.
-- `web/src/features/scans/types.ts`: TS mirrors of shared DTOs.
-- `web/src/features/scans/hooks.ts`: submit scan, poll status, derive phase text.
-- `web/src/features/scans/components/`: URL form, loading state, error state, score cards, findings lists, recommended actions, re-scan CTA.
-- `web/src/components/ui/`: shadcn primitives only where they add value; keep domain presentation inside feature components.
-
-Shared types
-- `CreateScanRequest { url: string }`
-- `CreateScanResponse { id: Uuid, status: ScanStatus }`
-- `GetScanResponse { scan: ScanDto, summary: SummaryDto | null, findings: FindingsDto, error: ScanErrorDto | null }`
-- `ScanDto { id, url, status, phase, created_at, updated_at, completed_at }`
-- `SummaryDto { overall_score, accessibility_score, safety_score, website_summary }`
-- `AccessibilityFindingDto { id, severity, rule_id, title, description, selector, impact, recommendation }`
-- `ContentFindingDto { id, severity, category, excerpt, rationale, recommendation }`
-- `RecommendedActionDto { priority, title, detail, source }`
-
-Data model direction
-- `scans` table: `id`, `url`, `status`, `phase`, `error_message`, `summary_json` optional, timestamps.
-- `findings` table: `id`, `scan_id`, `source` (`accessibility` or `content_safety`), `category`, `severity`, `title`, `detail`, `location`, `metadata_json`, timestamps.
-- Keep raw provider payloads out of the primary tables unless debugging proves necessary. If needed later, add optional JSON columns or a separate artifacts table rather than coupling MVP reads to provider-specific schemas.
+Current module ownership
+- `crates/server/src/config.rs`: environment parsing and required/optional
+  variable handling.
+- `crates/server/src/main.rs`: startup logging, Anthropic client construction,
+  worker dispatcher wiring, API response DTOs, integration tests.
+- `crates/worker/src/lib.rs`: scan phase orchestration, content-safety call,
+  aggregation, worker tests and fakes.
+- `crates/core/src/models.rs`: persisted scan domain model and score update
+  contract.
+- `crates/storage/src/repository.rs`: SQL read/write mapping for scans and
+  findings.
+- `migrations/`: database schema changes. Add a new migration rather than
+  editing `0001_init.sql` for an existing deployed schema.
+- `web/src/lib/api/types.ts`: TypeScript mirror of `GET /api/scans/:id`.
+- `web/src/App.tsx`: dashboard rendering for score cards, findings sections,
+  category breakdown, and recommended actions.
+- `README.md` and `.env.example`: operator-facing configuration docs.
 
 Issue dependency order
-- Foundation: #1, #2, #3, #4, #5, #6
-- Core domain: #7, #8, #9
-- API surface: #10, #11, #12
-- Worker capabilities: #13, #14, #15, #16, #17
-- Orchestration/persistence: #18, #19, #20
-- Frontend data contract: #21
-- Frontend UX flow: #22, #23, #24, #25, #26, #27, #28, #30
-- System validation/docs: #29, #31
-
-Critical cross-issue dependencies
-- #5 depends on #1 and #4 because the server must know where built SPA assets live.
-- #8 depends on #6 and should align with the enums from #7.
-- #10 and #11 depend on #8 and #9, and are easier once #7 defines statuses/phases.
-- #12 should wait until #10 and #11 are stable enough to lock the contract.
-- #15 depends on #14 and the scoring semantics from #7.
-- #17 depends on #16 and should produce normalized findings compatible with #8.
-- #18 depends on #13, #15, and #17 because the pipeline phases wrap those units.
-- #19 depends on #18 and the repository layer from #8.
-- #20 depends on #10, #18, and #19.
-- #21 should be cut after #10 and #11 so the contract is not speculative.
-- #22 through #28 depend on #21 and progressively richer backend payloads.
-- #29 depends on the end-to-end happy path across #20 and #28.
-- #31 should reflect final architecture after the earlier issues land.
+- #63 first: change `Config::anthropic_api_key` from `String` to
+  `Option<String>`, load it with the existing `optional_var`, document the
+  optional env var in `.env.example`, and make startup logging say content safety
+  is disabled when the key is absent.
+- #64 depends on #63: construct `AnthropicClient` only when the config contains
+  a key. Pass `Option<AnthropicClient>` or an equivalent optional trait object
+  through `build_worker_dispatcher` and `ScanWorker`.
+- #65 depends on #64 and the data model change: in `run_scan`, skip the
+  content-safety phase when no client is available, do not call Anthropic, set
+  `inappropriate_score = 0`, persist `content_safety_skipped = true`, and derive
+  risk from accessibility findings only.
+- #66 depends on #65: expose `content_safety_skipped: bool` in
+  `GetScanResponse`, API tests, and frontend shared types.
+- #67 depends on #66: update the dashboard so skipped content safety is rendered
+  as "Not evaluated" / "set ANTHROPIC_API_KEY to enable" rather than as a clean
+  zero-signal result.
+- #68 validates #65: add a worker unit test where the optional client is absent,
+  asserting no client call, zero inappropriate findings/score, skipped flag true,
+  and accessibility-only risk calculation.
+- #69 should land after behavior is clear: update README and `.env.example` to
+  describe `ANTHROPIC_API_KEY` as optional and explain the skipped dashboard
+  state.
 
 Key design decisions
-- Single deployable service: keep the API server and background execution inside one binary for simplicity. Model the worker as an internal async job dispatcher first; only abstract a queue boundary if scale or reliability needs force it later.
-- Shared contract crate: centralize API DTOs in Rust so route handlers and repository/worker outputs converge on one schema. The frontend can mirror these types in TS with a small manual layer; avoid premature codegen tooling unless drift becomes a real problem.
-- Explicit phase model: represent lifecycle with both coarse `status` and fine-grained `phase`. This supports frontend loading states and operational debugging without overloading one enum.
-- Repository isolation: keep sqlx queries out of handlers and workers. Handlers initiate workflows; repositories own persistence; worker owns orchestration.
-- Pure scoring logic: keep scoring and recommendation generation in `core` so unit tests can cover it without Postgres, HTTP, or browser dependencies.
-- Guardrails first: URL validation and SSRF protection are part of request acceptance, not a browser concern. Reject invalid/private-network targets before any job starts.
-- Provider normalization: axe-core and Anthropic outputs should be transformed into internal finding models immediately. Do not let third-party payload shapes leak into API responses.
-- Polling over push: `GET /api/scans/:id` polling is sufficient for this issue set and keeps the system simpler than websockets/SSE.
-- Frontend as feature-first: organize UI by the scan workflow, not by atomized presentational layers. That keeps the dashboard screens aligned with the API contract and issue breakdown.
-- Testing pyramid: unit-test `core`, integration-test API/repositories against Postgres, then add one Playwright happy-path e2e to verify the full scan flow.
+- Persist `content_safety_skipped` on the scan row. Do not infer it from the
+  current process environment or from `inappropriate_score == 0`; historical
+  scans must remain truthful even if configuration changes later.
+- Keep PostgreSQL as the only persistent store. This batch does not introduce a
+  new database choice.
+- Use an additive migration, likely:
+  `ALTER TABLE scans ADD COLUMN content_safety_skipped BOOLEAN NOT NULL DEFAULT FALSE;`
+- Extend `Scan`, row mapping, and all scan `RETURNING`/`SELECT` projections
+  together so compile errors catch missed query sites.
+- Prefer a minimal worker API change: make the content-safety client optional at
+  the `ScanWorker` boundary, while keeping `PageAnalyzer` and `ScanStore`
+  unchanged.
+- Keep the `content_safety` phase out of the persisted phase history when it is
+  skipped; after accessibility, move directly to `aggregating`.
+- Use existing aggregation/scoring helpers where possible. If current helpers
+  require both finding lists, pass an empty content-safety list and persist the
+  explicit skipped flag to disambiguate UI semantics.
+- API field name should be exactly `content_safety_skipped` to match the issue
+  text and existing snake_case DTO style.
+- Frontend must not show "inappropriate score 0" as a clean finding when
+  `content_safety_skipped` is true. The score card and inappropriate findings /
+  content breakdown areas should show an informational empty state instead.
+- Startup logging should avoid secret values and should not emit error-level
+  logs for the optional-key path.
 
-Implementation guidance for later sessions
-- Start with compile-safe stubs and typed boundaries, then replace internals incrementally.
-- Prefer `sqlx` query macros only after schema files stabilize enough to support offline checking.
-- Keep migrations additive and idempotent.
-- Ensure worker phases are persisted atomically enough that polling clients never observe impossible state transitions.
+Testing focus
+- Config unit coverage for missing and empty `ANTHROPIC_API_KEY`.
+- Worker unit coverage for the skipped path and for the existing configured path
+  to guard against regressions.
+- API integration response fixture includes `content_safety_skipped`.
+- Frontend type/UI checks cover the skipped notice state.
