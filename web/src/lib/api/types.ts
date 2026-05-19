@@ -73,6 +73,7 @@ export type ScanResponse = {
   accessibility_score: number | null
   inappropriate_score: number | null
   risk_level: RiskLevel | null
+  content_safety_skipped: boolean
   error_reason: ScanErrorReason | null
   accessibility: FindingDto[]
   inappropriate: FindingDto[]

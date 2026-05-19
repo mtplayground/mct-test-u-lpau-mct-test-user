@@ -274,6 +274,7 @@ struct GetScanResponse {
     accessibility_score: Option<i32>,
     inappropriate_score: Option<i32>,
     risk_level: Option<String>,
+    content_safety_skipped: bool,
     error_reason: Option<String>,
     accessibility: Vec<FindingResponse>,
     inappropriate: Vec<FindingResponse>,
@@ -635,6 +636,7 @@ fn build_scan_response(scan: Scan, findings: Vec<Finding>) -> GetScanResponse {
         accessibility_score: scan.accessibility_score,
         inappropriate_score: scan.inappropriate_score,
         risk_level: scan.risk_level.map(|level| level.as_str().to_owned()),
+        content_safety_skipped: scan.content_safety_skipped,
         error_reason: scan.error_reason,
         accessibility,
         inappropriate,
@@ -727,6 +729,7 @@ mod tests {
         assert_eq!(polled.accessibility_score, Some(1));
         assert_eq!(polled.inappropriate_score, Some(8));
         assert_eq!(polled.risk_level.as_deref(), Some("high"));
+        assert!(!polled.content_safety_skipped);
         assert_eq!(polled.accessibility.len(), 1);
         assert_eq!(polled.inappropriate.len(), 1);
         assert_eq!(
