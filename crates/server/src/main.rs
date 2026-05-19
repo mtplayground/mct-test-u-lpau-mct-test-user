@@ -62,12 +62,16 @@ async fn main() -> Result<(), AppError> {
     info!(
         address = %addr,
         database_connections = database.pool().size(),
-        anthropic_key_configured = !config.anthropic_api_key.is_empty(),
+        anthropic_key_configured = config.anthropic_api_key.is_some(),
+        content_safety = if config.anthropic_api_key.is_some() { "enabled" } else { "disabled" },
         chromium_path = %config.chromium_path.display(),
         scan_timeout_secs = config.scan_timeout.as_secs(),
         migrations_ran = true,
         "server listening"
     );
+    if config.anthropic_api_key.is_none() {
+        info!("content safety disabled");
+    }
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -404,7 +408,7 @@ fn build_worker_dispatcher(
         None => Arc::new(SpawnedScanWorkerDispatcher::new(
             Arc::new(ChromiumPageAnalyzer),
             Arc::new(AnthropicClient::new(AnthropicClientConfig::new(
-                config.anthropic_api_key.clone(),
+                config.anthropic_api_key.clone().unwrap_or_default(),
             ))),
             worker_config,
         )),
