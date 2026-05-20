@@ -22,6 +22,9 @@ same Axum server binary.
   `content_safety_skipped`, keeps `inappropriateScore` at `0`, and derives risk
   from accessibility-only totals for that scan.
 - Persists scans and findings in PostgreSQL.
+- Starts in a degraded read-only mode if PostgreSQL is unavailable: the SPA and
+  health endpoint still serve, `POST /api/scans` returns a sentinel scan id, and
+  `GET /api/scans/0` returns a terminal failed scan response instead of a 5xx.
 - Returns scan status, phase, scores, risk level, `content_safety_skipped`,
   findings, category breakdown, and recommended actions.
 - Shows a complete frontend flow:
@@ -57,6 +60,9 @@ same Axum server binary.
 ## Conventions And Decisions
 
 - PostgreSQL is the only persistent store.
+- Database-backed scans require PostgreSQL. The degraded startup path exists so
+  deployments can still expose the UI and health checks while surfacing scan
+  unavailability as normal failed scan state rather than backend 5xx errors.
 - The frontend must be built before the Rust binary because the server serves
   `web/dist`.
 - Scans are asynchronous and phase-based: queued, loading, accessibility,
