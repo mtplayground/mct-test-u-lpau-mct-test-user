@@ -29,7 +29,7 @@ use zeroclaw_core::{
     category_breakdown, recommendations_text, validate_scan_url, Category, Finding, FindingKind, NewScan, Scan,
     ScanPhase, ScanStatus, Severity, UrlValidationError,
 };
-use zeroclaw_storage::{Database, DatabaseError, Repository, RepositoryError};
+use zeroclaw_storage::{Database, Repository, RepositoryError};
 use zeroclaw_worker::{
     ChromiumPageAnalyzer, ContentSafetyClient, PageAnalyzer, ScanWorker, WorkerConfig,
 };
@@ -41,10 +41,17 @@ async fn main() -> Result<(), AppError> {
     init_tracing()?;
 
     let config = Config::from_env().map_err(AppError::Config)?;
-    let database = Database::connect(&config.database_url)
-        .await
-        .map_err(AppError::Database)?;
-    let repository = Arc::new(Repository::new(database.pool().clone()));
+    let (repository, database_connections, degraded_mode) = match Database::connect(&config.database_url).await {
+        Ok(database) => (
+            Some(Arc::new(Repository::new(database.pool().clone()))),
+            database.pool().size(),
+            false,
+        ),
+        Err(error) => {
+            tracing::warn!(error = %error, "database unavailable at startup");
+            (None, 0, true)
+        }
+    };
     let worker_config = WorkerConfig {
         chromium_path: config.chromium_path.clone(),
         scan_timeout: config.scan_timeout,
@@ -52,7 +59,7 @@ async fn main() -> Result<(), AppError> {
     };
     let worker_dispatcher = build_worker_dispatcher(&config, worker_config);
     let app = build_router(AppState {
-        repository: repository.clone(),
+        repository,
         worker_dispatcher,
         allow_private_urls: config.allow_private_urls,
     });
@@ -61,12 +68,13 @@ async fn main() -> Result<(), AppError> {
 
     info!(
         address = %addr,
-        database_connections = database.pool().size(),
+        database_connections,
         anthropic_key_configured = config.anthropic_api_key.is_some(),
         content_safety = if config.anthropic_api_key.is_some() { "enabled" } else { "disabled" },
         chromium_path = %config.chromium_path.display(),
         scan_timeout_secs = config.scan_timeout.as_secs(),
         migrations_ran = true,
+        degraded_mode,
         "server listening"
     );
     if config.anthropic_api_key.is_none() {
@@ -122,11 +130,16 @@ async fn create_scan(
 ) -> Result<Json<CreateScanResponse>, ApiError> {
     let normalized_url = validate_request_url(&request.url, state.allow_private_urls)
         .map_err(|source| ApiError::Validation(ValidationError::new(source)))?;
+    let Some(repository) = state.repository.as_ref().cloned() else {
+        return Ok(Json(CreateScanResponse {
+            id: 0,
+            cached: false,
+        }));
+    };
     let force = request.force.unwrap_or(false);
 
     if !force {
-        if let Some(scan) = state
-            .repository
+        if let Some(scan) = repository
             .find_recent_completed_by_url(&normalized_url)
             .await
             .map_err(ApiError::Repository)?
@@ -141,8 +154,7 @@ async fn create_scan(
         }
     }
 
-    let scan = state
-        .repository
+    let scan = repository
         .insert_scan(&NewScan {
             url: request.url,
             normalized_url,
@@ -154,7 +166,7 @@ async fn create_scan(
 
     state
         .worker_dispatcher
-        .dispatch(scan.id, state.repository.clone());
+        .dispatch(scan.id, repository);
 
     Ok(Json(CreateScanResponse {
         id: scan.id,
@@ -166,20 +178,46 @@ async fn get_scan(
     State(state): State<AppState>,
     Path(scan_id): Path<i64>,
 ) -> Result<Json<GetScanResponse>, ApiError> {
-    let scan = state
-        .repository
+    let Some(repository) = state.repository.as_ref().cloned() else {
+        return if scan_id == 0 {
+            Ok(Json(build_scan_response(degraded_scan(), Vec::new())))
+        } else {
+            Err(ApiError::NotFound)
+        };
+    };
+    let scan = repository
         .find_scan_by_id(scan_id)
         .await
         .map_err(ApiError::Repository)?
         .ok_or(ApiError::NotFound)?;
 
-    let findings = state
-        .repository
+    let findings = repository
         .list_findings_for_scan(scan.id)
         .await
         .map_err(ApiError::Repository)?;
 
     Ok(Json(build_scan_response(scan, findings)))
+}
+
+fn degraded_scan() -> Scan {
+    let now = OffsetDateTime::now_utc();
+
+    Scan {
+        id: 0,
+        url: "unavailable".to_owned(),
+        normalized_url: "unavailable".to_owned(),
+        status: ScanStatus::Failed,
+        phase: ScanPhase::Failed,
+        accessibility_score: None,
+        inappropriate_score: None,
+        risk_level: None,
+        content_safety_skipped: true,
+        error_reason: Some(
+            "Database is unavailable, so scans cannot be started right now.".to_owned(),
+        ),
+        created_at: now,
+        updated_at: now,
+    }
 }
 
 fn init_tracing() -> Result<(), AppError> {
@@ -226,7 +264,6 @@ async fn shutdown_signal() {
 enum AppError {
     Bind(std::io::Error),
     Config(ConfigError),
-    Database(DatabaseError),
     Serve(std::io::Error),
     Tracing(tracing_subscriber::util::TryInitError),
 }
@@ -236,7 +273,6 @@ impl std::fmt::Display for AppError {
         match self {
             Self::Bind(error) => write!(f, "failed to bind TCP listener: {error}"),
             Self::Config(error) => write!(f, "{error}"),
-            Self::Database(error) => write!(f, "{error}"),
             Self::Serve(error) => write!(f, "server exited with error: {error}"),
             Self::Tracing(error) => write!(f, "failed to initialize tracing: {error}"),
         }
@@ -247,7 +283,7 @@ impl std::error::Error for AppError {}
 
 #[derive(Clone)]
 struct AppState {
-    repository: Arc<Repository>,
+    repository: Option<Arc<Repository>>,
     worker_dispatcher: Arc<dyn WorkerDispatcher>,
     allow_private_urls: bool,
 }
